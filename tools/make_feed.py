@@ -53,6 +53,10 @@ def main():
         art = ""
         if ep.get("art") and (ROOT / "art" / ep["art"]).exists():
             art = f'\n      <itunes:image href="{base}/art/{ep["art"]}"/>'
+        if ep.get("season") is not None:
+            art += f'\n      <itunes:season>{ep["season"]}</itunes:season>'
+        if ep.get("episode") is not None:
+            art += f'\n      <itunes:episode>{ep["episode"]}</itunes:episode>'
         items.append(f"""    <item>
       <title>{escape(ep["title"])}</title>
       <guid isPermaLink="false">{escape(ep["guid"])}</guid>
