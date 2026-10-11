@@ -1,0 +1,39 @@
+name: restore-audio
+on: workflow_dispatch
+permissions:
+  contents: write
+jobs:
+  restore:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+      - run: pip install yt-dlp
+      - name: download missing episode audio
+        run: |
+          python3 - <<'PY'
+          import json, subprocess, pathlib
+          jobs = json.load(open("tools/restore_jobs.json"))
+          audio = pathlib.Path("audio")
+          ok, fail = 0, []
+          for j in jobs:
+              out = audio / f"{j['out']}.m4a"
+              if out.exists() and out.stat().st_size > 0:
+                  ok += 1
+                  continue
+              r = subprocess.run(["yt-dlp", "-q", "-f", "bestaudio[ext=m4a]/bestaudio",
+                                  "-o", str(audio / (j['out'] + ".%(ext)s")),
+                                  f"https://www.youtube.com/watch?v={j['videoId']}"])
+              if r.returncode == 0:
+                  ok += 1
+              else:
+                  fail.append(j['videoId'])
+          print(f"downloaded {ok}/{len(jobs)}, failed: {fail}")
+          PY
+      - name: commit audio
+        run: |
+          git config user.name devopsinterviewcloud
+          git config user.email devopsinterview.cloud@gmail.com
+          git add audio/
+          git diff --cached --quiet || git commit -m "Restore episode audio"
+          git push

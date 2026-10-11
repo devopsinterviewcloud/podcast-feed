@@ -1,0 +1,212 @@
+[
+ {
+  "videoId": "KZF2pXGnSpg",
+  "out": "ep_20260712_1000776424075",
+  "title": "The Kubernetes Machine: From kubectl apply to Running Containers"
+ },
+ {
+  "videoId": "4ff63f-Ez24",
+  "out": "ep_20260704_1000775440641",
+  "title": "Karpenter Spot Interruption: Fallback & Graceful Drain"
+ },
+ {
+  "videoId": "33BgTVHamN0",
+  "out": "ep_20260704_1000775439911",
+  "title": "Canary Analysis for Flink Streaming: Prometheus, Loki & Pyroscope"
+ },
+ {
+  "videoId": "q9gxYkdne7Q",
+  "out": "ep_20260704_1000775412233",
+  "title": "Grafana Mimir Storage: Tiered S3 at 10TB/day"
+ },
+ {
+  "videoId": "gLJBLcWyeSg",
+  "out": "ep_20260624_1000773973189",
+  "title": "SLO Error Budget Burn Rate: Azure Zone Outage Math"
+ },
+ {
+  "videoId": "krYDj_a6sQw",
+  "out": "ep_20260623_1000773832504",
+  "title": "PCI-DSS Serverless Payments on GCP: Confidential VMs, CEKM & Binary Authorization"
+ },
+ {
+  "videoId": "K0rdN0xZPD8",
+  "out": "ep_20260623_1000773831541",
+  "title": "Cross-Account EKS with AWS CDK: VPC Peering and Transit Gateway"
+ },
+ {
+  "videoId": "QGuwJ9uNYF4",
+  "out": "ep_20260621_1000773601997",
+  "title": "OpenTelemetry + CloudWatch Logs Insights: Tracing Serverless Apps"
+ },
+ {
+  "videoId": "dg2atCzzsZU",
+  "out": "ep_20260621_1000773575716",
+  "title": "Terraform State Splitting: terraform state rm + moved Blocks"
+ },
+ {
+  "videoId": "_8-3OSqeETo",
+  "out": "ep_20260620_1000773522225",
+  "title": "Monorepo CI at Scale: Bazel Caching for 1,000 Microservices"
+ },
+ {
+  "videoId": "9w9Vq3OSdoA",
+  "out": "ep_20260620_1000773521828",
+  "title": "Azure RBAC with Pulumi: Dynamic Roles from YAML"
+ },
+ {
+  "videoId": "C7l_pB5zVVw",
+  "out": "ep_20260617_1000773120608",
+  "title": "Prometheus Cardinality: Cutting 10M Series to 500K for Istio"
+ },
+ {
+  "videoId": "Dt1ysh5gyGE",
+  "out": "ep_20260617_1000773118681",
+  "title": "Conftest in Argo CD: Block Public S3 Buckets at GitOps Gate"
+ },
+ {
+  "videoId": "gnvDZfjJsqQ",
+  "out": "ep_20260617_1000773063401",
+  "title": "Terragrunt at Scale: Dependency Graphs, Circular Deps & OCI Versioning"
+ },
+ {
+  "videoId": "giEiAkjS_9U",
+  "out": "ep_20260617_1000773060914",
+  "title": "External Secrets Operator: Vault Dynamic Secrets in Kubernetes Without Sidecars"
+ },
+ {
+  "videoId": "wjN-KoPKP9o",
+  "out": "ep_20260616_1000772955763",
+  "title": "Jenkins Helm Deadlocks: Diagnose with jstack and Mutex Locks"
+ },
+ {
+  "videoId": "F6PNys4Pwjc",
+  "out": "ep_20260616_1000772955371",
+  "title": "CloudFormation Drift Detection: AWS Config + Lambda Auto-Remediation"
+ },
+ {
+  "videoId": "b4FQQhh6DoA",
+  "out": "ep_20260615_1000772803503",
+  "title": "DynamoDB Multi-Region Cost: Cut Data Transfer 70%"
+ },
+ {
+  "videoId": "wZwkTjf91e4",
+  "out": "ep_20260615_1000772801890",
+  "title": "Flyway + Kubernetes: Rolling Back Failed DB Migrations"
+ },
+ {
+  "videoId": "4C05tmZl170",
+  "out": "ep_20260614_1000772642206",
+  "title": "Terraform Apply Timeouts: IAM Role Batching at Scale"
+ },
+ {
+  "videoId": "lH0POq19dgI",
+  "out": "ep_20260614_1000772641505",
+  "title": "GitHub Actions at 10K Daily Builds: Runner Strategy for Scale"
+ },
+ {
+  "videoId": "WNS3bBY46Dc",
+  "out": "ep_20260613_1000772531908",
+  "title": "FIPS 140-3 on EKS: Bottlerocket OS and KMS Hardware Modules"
+ },
+ {
+  "videoId": "J5GgwwtVe3U",
+  "out": "ep_20260613_1000772524154",
+  "title": "AWS Lookout for Metrics: Killing Alert Fatigue at Scale"
+ },
+ {
+  "videoId": "QsscuoKV6BA",
+  "out": "ep_20260612_1000772366288",
+  "title": "Cross-Account IAM Roles: Auditing with Access Analyzer"
+ },
+ {
+  "videoId": "M3qCVkI2WtM",
+  "out": "ep_20260610_1000772030195",
+  "title": "Container Runtime Security: seccomp, AppArmor & eBPF LSM"
+ },
+ {
+  "videoId": "tAizTlPxMto",
+  "out": "ep_20260610_1000772028947",
+  "title": "FinOps 2.0: Forecast GenAI Cloud Spend with AWS Cost Explorer and Prophet"
+ },
+ {
+  "videoId": "lZp_FJ07lT8",
+  "out": "ep_20260608_1000771676230",
+  "title": "Secret Scanning in CI: Stop AWS Keys Leaking to GitHub"
+ },
+ {
+  "videoId": "1eX2U3Hd42w",
+  "out": "ep_20260608_1000771674846",
+  "title": "VPC Flow Log Anomaly Detection: Amazon Detective + Athena ML"
+ },
+ {
+  "videoId": "KZhl6tCE5XM",
+  "out": "ep_20260606_1000771415448",
+  "title": "Karpenter Multi-Team Clusters: NodePools, Weights & Isolation"
+ },
+ {
+  "videoId": "rUsMInc_F9E",
+  "out": "ep_20260605_1000771320187",
+  "title": "Karpenter EC2NodeClass: AMI, Subnets, and EBS Config"
+ },
+ {
+  "videoId": "tBzOPUMhYx4",
+  "out": "ep_20260228_1000752070302",
+  "title": "Karpenter Consolidation & Drift: 2 AM Node Cleanup"
+ },
+ {
+  "videoId": "NAiJM5hKCuA",
+  "out": "ep_20260126_1000746689903",
+  "title": "Karpenter Lifecycle: How GPU Pods Get Unstuck"
+ },
+ {
+  "videoId": "zh3JIRr2UAM",
+  "out": "ep_20250918_1000727314901",
+  "title": "Azure Container Apps Migration: Zero-Downtime .NET & SQL AG"
+ },
+ {
+  "videoId": "tu8mjK-AXDs",
+  "out": "ep_20250910_1000725856517",
+  "title": "Argo CD Multi-Tenancy: SSO, Sharding & Namespace Isolation"
+ },
+ {
+  "videoId": "cfj5JnfQEWw",
+  "out": "ep_20250909_1000725673366",
+  "title": "Kyverno Pod Security: Allowing NET_RAW for Legacy Apps"
+ },
+ {
+  "videoId": "3pD6SmBtFZQ",
+  "out": "ep_20250901_1000725480511",
+  "title": "Java 21 Lambda Cold Starts: SnapStart vs Provisioned Concurrency vs GraalVM"
+ },
+ {
+  "videoId": "IqqXvz6kRCg",
+  "out": "ep_20250826_1000725480309",
+  "title": "Kata Containers: Diagnosing \u2019Container Not Started\u2019 Errors"
+ },
+ {
+  "videoId": "dKXIFoM_Xp8",
+  "out": "ep_20250825_1000725480454",
+  "title": "S3 Object Lambda: Redact PII from Legacy Data Without ETL"
+ },
+ {
+  "videoId": "N2zB5RtexyY",
+  "out": "ep_20250825_1000725480452",
+  "title": "AWS Global Accelerator Latency: Direct Connect Troubleshooting"
+ },
+ {
+  "videoId": "TTxdHv5phzI",
+  "out": "ep_20250825_1000725480427",
+  "title": "AKS Zero-Trust Access: Arc, OPA Gatekeeper & On-Prem"
+ },
+ {
+  "videoId": "n7TeebDb7rA",
+  "out": "ep_20250822_1000725480400",
+  "title": "Quantum-Resistant Encryption on GCP: Kyber, Dilithium & Key Rotation"
+ },
+ {
+  "videoId": "JKWpT_5RktQ",
+  "out": "ep_20250821_1000725480453",
+  "title": "Multi-Cloud Video Pipeline: Active-Active Under 100ms"
+ }
+]

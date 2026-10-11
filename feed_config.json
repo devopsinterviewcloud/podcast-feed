@@ -1,0 +1,11 @@
+{
+  "title": "DevOps & Cloud Interview Prep: Real Scenarios & Answers",
+  "link": "https://devopsinterview.cloud",
+  "base_url": "https://devopsinterviewcloud.github.io/podcast-feed",
+  "description": "Real DevOps and cloud interview scenarios, broken down the way a senior engineer would answer them. Kubernetes, AWS, Terraform, CI/CD, observability and incident response, with the trade-offs interviewers actually probe for. More prep material at devopsinterview.cloud.",
+  "author": "DevOpsInterview.Cloud",
+  "email": "devopsinterview.cloud@gmail.com",
+  "category": "Technology",
+  "language": "en",
+  "cover": "art/cover.png"
+}
