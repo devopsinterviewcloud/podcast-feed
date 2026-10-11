@@ -3,10 +3,13 @@
 
 Needs a residential IP (datacenter IPs get YouTube's bot wall) and a CURRENT
 yt-dlp -- an old one fails with "Only images are available" / "Precondition
-check failed". Easiest is the standalone binary, dropped in the repo root:
+check failed". Easiest is the standalone binary, dropped in the repo root
+AS "yt-dlp" -- note the per-OS asset names (the plain "yt-dlp" asset is a
+Python zip that needs system Python 3.10+, not standalone):
 
-    curl -L https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp -o yt-dlp && chmod +x yt-dlp
-    (Windows: same URL with yt-dlp.exe)
+    Linux:   curl -L https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp_linux -o yt-dlp && chmod +x yt-dlp
+    macOS:   curl -L https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp_macos -o yt-dlp && chmod +x yt-dlp
+    Windows: curl.exe -L https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp.exe -o yt-dlp.exe
 
 then run from the repo root:
 
