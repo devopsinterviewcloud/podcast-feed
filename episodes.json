@@ -96,7 +96,7 @@
   "description": "A pending ML training job needing 8 GPUs is a classic Karpenter interview scenario \u2014 here's the exact four-step lifecycle an interviewer expects you to walk through.\n\nYou'll learn:\n\nWhy the K8s scheduler marks pods unschedulable and how Karpenter's controller watches for that signal\nHow Karpenter evaluates all pod constraints at once \u2014 resource requests, nodeSelector, nodeAffinity, tolerations, and topology spread\nHow it calls the EC2 API to select the right instance (p3.16xlarge for 8 GPUs) in the correct availability zone\nWhy Karpenter provisions the node but the K8s scheduler still does the final pod binding \u2014 a gotcha that trips up a lot of candidates\n\nKeywords: Karpenter node provisioning, Kubernetes GPU scheduling, pending pods interview question, Karpenter vs cluster autoscaler, K8s scheduler lifecycle\n\n\ud83c\udfa7 Listen, then go deeper \u2014 DevOps & Cloud interview-prep ebooks at DevOpsInterview.Cloud",
   "file": "ep_20260126_1000746689903.m4a",
   "art": null,
-  "draft": false
+  "draft": true
  },
  {
   "title": "Karpenter Consolidation & Drift: 2 AM Node Cleanup",
@@ -159,7 +159,7 @@
   "description": "Blocking zero-day exploits in container runtimes means layering seccomp, AppArmor, and eBPF LSM hooks \u2014 and knowing exactly where each one fits in the kernel's enforcement chain.\n\nYou'll learn:\n\nHow seccomp profiles restrict syscall surfaces and which calls are most dangerous to leave open in container workloads\nWriting and applying AppArmor profiles to constrain file, network, and capability access at the container level\nWhere eBPF LSM hooks sit relative to seccomp and AppArmor \u2014 and why stacking them closes gaps neither covers alone\nCommon misconfigurations that leave runtime defenses bypassable even when all three are nominally enabled\nHow to audit enforcement gaps using tools like bpftrace, strace, and amicontained\n\nKeywords: container runtime security, seccomp profiles Kubernetes, AppArmor containers, eBPF LSM hooks, zero-day exploit prevention\n\n\ud83c\udfa7 Listen, then go deeper \u2014 DevOps & Cloud interview-prep ebooks at DevOpsInterview.Cloud",
   "file": "ep_20260610_1000772030195.m4a",
   "art": null,
-  "draft": false
+  "draft": true
  },
  {
   "title": "Cross-Account IAM Roles: Auditing with Access Analyzer",
@@ -213,7 +213,7 @@
   "description": "When a database migration fails mid-deploy, your Kubernetes job hooks and Flyway versioning strategy are the difference between a five-minute fix and a 2am incident.\n\nYou'll learn:\n\nHow to structure Flyway versioned and undo migrations so a failed V3 doesn't leave your schema in a half-applied state\nUsing Kubernetes init containers and Job postStart/preStop hooks to gate application rollout on migration success or failure\nWhy flyway repair matters when checksums break and how to use it safely in CI pipelines\nPatterns for keeping application code and schema changes in sync across canary and blue-green deployments\nWhat interviewers actually want to hear when they ask about zero-downtime schema migrations at scale\n\nKeywords: Flyway rollback strategy, Kubernetes job hooks database, schema versioning DevOps interview, failed database migration recovery\n\n\ud83c\udfa7 Listen, then go deeper \u2014 DevOps & Cloud interview-prep ebooks at DevOpsInterview.Cloud",
   "file": "ep_20260615_1000772801890.m4a",
   "art": null,
-  "draft": false
+  "draft": true
  },
  {
   "title": "DynamoDB Multi-Region Cost: Cut Data Transfer 70%",

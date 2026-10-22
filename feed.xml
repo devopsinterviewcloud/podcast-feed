@@ -1,0 +1,1138 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<rss version="2.0" xmlns:itunes="http://www.itunes.com/dtds/podcast-1.0.dtd" xmlns:atom="http://www.w3.org/2005/Atom">
+  <channel>
+    <title>DevOps &amp; Cloud Interview Prep: Real Scenarios &amp; Answers</title>
+    <link>https://devopsinterview.cloud</link>
+    <atom:link href="https://devopsinterviewcloud.github.io/podcast-feed/feed.xml" rel="self" type="application/rss+xml"/>
+    <description>Real DevOps and cloud interview scenarios, broken down the way a senior engineer would answer them. Kubernetes, AWS, Terraform, CI/CD, observability and incident response, with the trade-offs interviewers actually probe for. More prep material at devopsinterview.cloud.</description>
+    <language>en</language>
+    <lastBuildDate>Thu, 22 Oct 2026 14:23:04 +0000</lastBuildDate>
+    <itunes:author>DevOpsInterview.Cloud</itunes:author>
+    <itunes:owner>
+      <itunes:name>DevOpsInterview.Cloud</itunes:name>
+      <itunes:email>devopsinterview.cloud@gmail.com</itunes:email>
+    </itunes:owner>
+    <itunes:image href="https://devopsinterviewcloud.github.io/podcast-feed/art/cover.png"/>
+    <itunes:category text="Technology"/>
+    <itunes:explicit>false</itunes:explicit>
+    <item>
+      <title>EKS Control Plane Logs: Audit Trail for a Compliance Breach</title>
+      <guid isPermaLink="false">dd84665a-5b6d-4bbe-b187-16105f238e99</guid>
+      <pubDate>Wed, 07 Oct 2026 12:00:00 +0000</pubDate>
+      <description><![CDATA[A walkthrough of EKS control plane log types, how to enable them, and how to query CloudWatch Logs Insights for suspicious API calls after a compliance audit flags unexpected activity. Covers audit, authenticator, and API server logs, plus building alerts on sensitive verbs like secrets access and exec into pods.
+
+Visit https://devopsinterview.cloud for interview prep ebooks, roadmaps and hands-on incident labs.
+
+Transcript
+
+A compliance auditor sends you a spreadsheet. Thirty rows, each one a Kubernetes API call nobody can explain. A secret was read at two in the morning. A role binding was created and deleted within ninety seconds. Someone exec'd into a pod in the payments namespace three weeks ago. Your first question isn't who did this. It's do we even have the logs to find out. And on a lot of EKS clusters, the honest answer is no, because control plane logging is off by default.
+
+Interviewers ask about this because it separates people who've run Kubernetes from people who've only read about it. Anyone can describe a deployment. Far fewer people can explain where the audit trail actually lives, what it costs, and how you'd write a query under pressure when legal is asking for answers by end of day. This is an operational maturity question wearing a security costume.
+
+Here's the mental model. EKS runs a managed control plane, which means you don't get shell access to the API server, but AWS exposes five log streams you can turn on independently: api, audit, authenticator, controllerManager, and scheduler. Each one answers a different question. The api log is general chatter about requests hitting the Kubernetes API server. The audit log is the one compliance actually cares about, because it's a structured record of every request, who made it, what verb, what resource, and what the response was. The authenticator log tells you how AWS Identity and Access Management identities map to Kubernetes users, which matters enormously when someone claims an IAM role did something it shouldn't have. ControllerManager and scheduler logs are mostly for platform health, not forensics, so for a compliance investigation you're almost always starting with audit and authenticator together.
+
+None of these are enabled by default, because every stream you turn on bills you for CloudWatch Logs ingestion and storage, and audit logs in a busy cluster are noisy. So the first finding in almost every post-incident report is simply that audit logging was off, and the fix is one command. You enable it through the EKS update cluster config call, or through Terraform or the console, setting enabled log types to the ones you want. A realistic baseline for a compliance-sensitive cluster is audit, authenticator, and api. You skip controllerManager and scheduler unless you're debugging scheduling behavior, because they add volume without adding security signal.
+
+Once logs are flowing, they land in a CloudWatch log group named something like forward slash aws forward slash eks forward slash your-cluster-name forward slash cluster, with a log stream per type. This is where CloudWatch Logs Insights comes in, because scrolling through raw JSON audit events by hand is how you miss things. Logs Insights lets you write a query language against these log groups without exporting anything.
+
+Let's walk through the actual investigation. You start broad. You query the audit log group for the time window the auditor flagged, filtering for verb equals get or verb equals list against the resource secrets. A typical query looks like this, read as plain filters: parse the log line as JSON, filter where object-dot-resource equals secrets, filter where verb is in the list get, list, or watch, then display timestamp, user-dot-username, source IPs, and the response status. You sort by timestamp descending and look at the time range around that two a.m. read. If the username comes back as a specific IAM role rather than a human SSO identity, you've already learned something: this wasn't a person clicking around, it was a workload or a CI pipeline, which changes the whole shape of the investigation.
+
+Next you pivot to the authenticator log for the same timestamp, to see how that IAM role got mapped into a Kubernetes identity. This tells you which aws-auth config map entry or access entry granted it. If it's mapped to a broad group like system colon masters instead of a narrowly scoped role, that's your root cause right there, independent of whatever the actual API call was. A huge number of these incidents aren't exotic attacks, they're a role that got bound to cluster-admin months ago for a one-time migration task and never got cleaned up.
+
+Then you go back to the audit log and expand the search to every verb that role used in the last ninety days, not just the flagged event, because auditors want the blast radius, not just the single call. You're looking for create, update, patch, or delete against resources like secrets, rolebindings, clusterrolebindings, and the pods exec subresource. That last one matters a lot and people forget it. An exec into a pod shows up in the audit log as a request to the pods forward slash exec subresource, and it's one of the highest-value things to monitor because it's effectively a remote shell into your cluster. If compliance is asking about unauthorized access, exec events are usually more interesting than ordinary get and list calls.
+
+Now, for the number that actually matters to your manager: log volume and retention. A single audit event with full request and response bodies can run a few kilobytes, and a moderately busy cluster can generate tens of thousands of these an hour. That adds up to real CloudWatch ingestion cost fast, which is exactly why some teams enable audit logging, panic at the bill, and turn it back off. The better answer is to set a CloudWatch log group retention policy, something like thirty or ninety days depending on your compliance requirement, and then export to S3 for cheaper long-term archival if your regulator wants a full year. Don't just disable the stream to save money. That's the same mistake that caused the original gap.
+
+Now for building the alert, because finding the problem after the fact is good, but interviewers want to hear that you'd catch it in near real time next time. The pattern is a CloudWatch Logs metric filter on the audit log group, matching on a combination of verb and resource and response status. You define a filter pattern that matches delete or create verbs against resources like secrets, rolebindings, clusterrolebindings, and serviceaccounts, with a response code in the two hundreds meaning it succeeded. That metric filter increments a CloudWatch metric, and you attach a CloudWatch alarm on top of it with a threshold of one, meaning any single match fires. You route that alarm to an SNS topic, which fans out to Slack or PagerDuty depending on severity. For exec events specifically, a lot of teams set a lower bar and alert on every single occurrence in production namespaces, because legitimate exec usage in prod should be rare and logged through a break-glass process anyway, not routine.
+
+If you want push-button detection instead of hand-rolled metric filters, this is also where GuardDuty for EKS protection fits in, since it already profiles control plane audit logs for anomalous behavior like unusual API calls from a region you've never operated in, or credential use patterns that don't match historical baselines. The honest answer in an interview is that GuardDuty is a good complement, not a replacement, because it's tuned for general anomaly patterns, while your own metric filters can encode organization-specific policy, like the fact that nobody except your platform team's CI role should ever touch clusterrolebindings.
+
+Let's talk about the wrong answers people give here, because they're common and they sound confident. The first wrong answer is pointing at kubectl get events. Kubernetes events are ephemeral, they expire after an hour by default, and they only cover a narrow set of object lifecycle changes. They are not an audit trail and they will not survive long enough for a compliance review anyway. The second wrong answer is saying you'd check CloudTrail. CloudTrail logs the EKS control plane management API, meaning calls like create cluster or update nodegroup config, the things you do to the cluster itself through AWS APIs. It does not log what happens inside the Kubernetes API server, meaning it will never show you a get on a secret or an exec into a pod. People mix these up constantly and it's an easy tell in an interview that someone hasn't actually operated EKS day to day. The third wrong answer is enabling all five log types all the time everywhere, which just burns budget without improving your signal, since controllerManager and scheduler logs rarely matter for security investigations.
+
+Quick recap. EKS control plane logging is off by default, so step one in any compliance conversation is confirming audit and authenticator logs are actually enabled, because CloudTrail and Kubernetes events do not cover this gap. CloudWatch Logs Insights lets you query those logs by verb, resource, and username, letting you trace an IAM role through authenticator mapping and into the specific audit events it generated. Build metric filters on sensitive verbs against secrets, role bindings, and the pods exec subresource, wire them into an alarm and SNS, and treat GuardDuty as a complementary layer rather than your only detection. Set a sane retention policy so cost doesn't push you back toward logging nothing at all.
+
+If you want the written version of this with the exact query syntax and metric filter patterns laid out step by step, go grab the guide at devopsinterview dot cloud and keep it next to you for your next interview or your next real audit.]]></description>
+      <enclosure url="https://devopsinterviewcloud.github.io/podcast-feed/audio/episode_20261007.mp3" length="9641943" type="audio/mpeg"/>
+      <itunes:duration>00:10:02</itunes:duration>
+      <itunes:explicit>false</itunes:explicit>
+      <itunes:image href="https://devopsinterviewcloud.github.io/podcast-feed/art/episode_20261007.jpg"/>
+    </item>
+    <item>
+      <title>EKS Control Plane Logs: Audit Trail for a Compliance Breach</title>
+      <guid isPermaLink="false">fe938f98-1832-406c-906b-d2f74b81dc58</guid>
+      <pubDate>Wed, 16 Sep 2026 12:00:00 +0000</pubDate>
+      <description><![CDATA[A walkthrough of EKS control plane logging for security investigations: which of the five log types actually capture who did what, how to write CloudWatch Logs Insights queries against audit logs, and how to build a metric filter alert on sensitive verbs like delete and create against secrets, roles, and the aws-auth configmap.
+
+Visit https://devopsinterview.cloud for interview prep ebooks, roadmaps and hands-on incident labs.
+
+Transcript
+
+A compliance audit flags a handful of API calls on your EKS cluster that nobody can explain. Someone created a cluster role binding last month. Someone else deleted a secret three weeks ago. The security team wants a name, a timestamp, and a source IP, and you go looking for the trail only to find that nobody turned on the logging that would have captured any of it. That gap is exactly what this question is testing, and it comes up constantly in SRE and platform interviews because it sits at the intersection of Kubernetes internals, AWS billing tradeoffs, and actual incident response.
+
+Interviewers ask this because almost everyone can say the phrase enable control plane logging, but very few can explain which of the five log types actually gives you an audit trail versus which ones are just operational noise. It also tests whether you understand that CloudTrail and Kubernetes audit logs are answering two completely different questions, which is a mistake that trips up even experienced engineers.
+
+Here's the mental model. EKS gives you five control plane log types: api server, audit, authenticator, controller manager, and scheduler. The controller manager and scheduler logs are mostly useful for debugging cluster behavior, like why a deployment isn't scaling or why pods are stuck pending. They're not what you want for a security investigation. The api server log shows you raw requests hitting the API server, which is useful but incomplete on its own. The two log types that actually matter for a compliance breach are audit and authenticator.
+
+The audit log is the Kubernetes API server's own audit trail. Every request that mutates or reads cluster state gets recorded with the verb, like get, create, update, patch, or delete, the object reference, meaning the resource type and namespace, the user identity, the source IP, the user agent, and a timestamp. This is your who-did-what record. The authenticator log is specific to EKS and shows you how IAM identities get mapped into Kubernetes RBAC through the aws-auth configmap or access entries. If someone's IAM role suddenly started acting like cluster-admin, the authenticator log is where you see that mapping happen.
+
+A critical point that trips people up in interviews: CloudTrail does not give you this. CloudTrail logs calls to the EKS control plane itself, things like CreateCluster, UpdateNodegroupConfig, or DescribeCluster. It has no visibility into what happens once a request reaches the Kubernetes API server inside the cluster. If someone uses kubectl to delete a secret or create a role binding, that's a Kubernetes API call, not an AWS API call, and CloudTrail simply won't see it. This distinction alone is a good signal in an interview because it shows you actually understand where the AWS control plane ends and the Kubernetes control plane begins.
+
+Now the walkthrough. First you enable the logging. Using the AWS command line, you'd run something like aws eks update-cluster-config, specifying your cluster name and a logging block that turns on the api, audit, and authenticator types, and explicitly turns off controller manager and scheduler if you don't need them. Once that's live, EKS starts streaming logs into a CloudWatch log group named something like slash aws slash eks slash your-cluster-name slash cluster, with separate log streams per type.
+
+Here's where the cost conversation matters, because interviewers love asking about this tradeoff. A moderately busy cluster, say fifty nodes with a healthy mix of workloads and controllers reconciling state, can easily generate two to five gigabytes of audit log data per day. CloudWatch charges roughly fifty cents per gigabyte ingested, plus storage costs on top, and audit logs are chatty by nature because every single API interaction, including read-only list and watch calls from system components, gets recorded. If you don't set a retention policy on that log group, you're paying to store that indefinitely. A sensible default is something like ninety days retention for audit logs to satisfy most compliance frameworks like SOC 2 or PCI DSS, then export older data to S3 if you need longer retention for legal reasons.
+
+Once the logs are flowing, you go to CloudWatch Logs Insights to actually investigate. This is a query language, not full text search, and it's worth knowing the syntax cold for an interview. A basic investigative query looks like this: you select fields for timestamp, the username under user, the verb, the object reference resource, the object reference namespace, and source IPs. Then you filter where verb is in the list delete, create, update, and where the object reference resource equals secrets. Then you sort by timestamp descending and limit the results. That single query answers the exact question compliance asked: who touched secrets, when, and from where.
+
+You'd run a similar query filtering on object reference resource equals clusterrolebindings or rolebindings to catch privilege escalation attempts, because creating a binding to the cluster-admin role is one of the most dangerous single actions someone can take in a cluster. You'd also want a query that filters specifically for changes to the aws-auth configmap, since that's the bridge between IAM and RBAC, and any unexpected edit there deserves immediate attention regardless of who made it.
+
+Investigation is reactive though, and the real value in an interview answer is showing you'd build proactive alerting instead of waiting for an auditor to ask questions. The pattern here is a CloudWatch metric filter on the audit log group that matches your sensitive verb and resource combination, for example delete against secrets, or create against clusterrolebindings, or any write verb against the aws-auth configmap specifically. That metric filter increments a custom metric whenever a match occurs. You attach a CloudWatch alarm to that metric with a threshold of one event over a five-minute window, and the alarm publishes to an SNS topic that fans out to Slack or PagerDuty. For teams doing more sophisticated response, you route the same metric filter through EventBridge into a Lambda function that automatically pulls the full audit record, checks the source IP against your known CIDR ranges, and opens a ticket automatically if it's an unrecognized source.
+
+Let's talk about the common wrong answers, because these show up constantly. The first is enabling only the api server log and assuming that's sufficient, when it actually gives you less structured identity information than the dedicated audit log. The second is treating CloudTrail as the audit trail for in-cluster activity, which as we covered, it simply isn't. The third is enabling everything, all five log types, without setting retention or filtering, which quietly turns into a massive CloudWatch bill within a month with no one noticing until finance asks questions. The fourth mistake is writing alerts that fire on every single write operation, which drowns your team in noise from legitimate CI/CD pipelines doing routine deployments, and within two weeks everyone starts ignoring the alert channel entirely. Good alerting here means scoping tightly to specific verb and resource combinations that are rare and high-risk, not broad categories.
+
+One more nuance worth mentioning if the interviewer pushes further: audit log entries include a stage field showing whether the record is the request received, the response started, or the response complete. For investigations you generally want the response complete stage, because that tells you whether the mutating action actually succeeded, versus a request that was received but denied by RBAC. Filtering only on request received would falsely flag denied attempts as successful actions, which matters a lot when you're trying to figure out whether an actual breach occurred or someone just got a permission denied error.
+
+So to recap. EKS gives you five control plane log types, but audit and authenticator are the ones that answer compliance and security questions, while controller manager and scheduler are for operational debugging. CloudTrail covers the AWS-level EKS API, not Kubernetes API calls inside the cluster, so don't confuse the two in an interview answer. Enable logging through cluster config, set a sane retention period to control cost, and use CloudWatch Logs Insights queries filtering on verb, object reference resource, and username to trace exactly who did what. Then move from reactive investigation to proactive alerting with metric filters on sensitive verb and resource combinations, especially around secrets, role bindings, and the aws-auth configmap, routed through SNS or EventBridge so you catch the next incident in minutes instead of during next quarter's audit.
+
+If you want to drill this kind of scenario until the answer comes out clean under pressure, head to the DevOps Interview Cloud channel on YouTube for daily thirty-second interview drills, and check devopsinterview dot cloud for the full write-up on this one.]]></description>
+      <enclosure url="https://devopsinterviewcloud.github.io/podcast-feed/audio/episode_20260916.mp3" length="9313009" type="audio/mpeg"/>
+      <itunes:duration>00:09:42</itunes:duration>
+      <itunes:explicit>false</itunes:explicit>
+      <itunes:image href="https://devopsinterviewcloud.github.io/podcast-feed/art/episode_20260916.jpg"/>
+    </item>
+    <item>
+      <title>AWS Network Firewall: Stop Exfil Without Breaking Egress</title>
+      <guid isPermaLink="false">devopsinterviewcloud.podbean.com/9ebdf113-b24a-5668-94dc-0c7fb6649510</guid>
+      <pubDate>Wed, 09 Sep 2026 11:33:06 +0000</pubDate>
+      <description><![CDATA[AWS Network Firewall in a centralized inspection VPC is the right answer when security hands you a ticket to block unexpected egress — here's how to design it without taking down production at 2am.
+
+You'll learn:
+
+Why the firewall lives in one centralized inspection VPC behind AWS Transit Gateway, not deployed per spoke VPC — and how the route tables enforce that
+How stateful domain-list rules use TLS SNI to allow *.github.com and *.pypi.org while dropping everything else on 443 — without decrypting traffic
+The encrypted client hello (ECH) blind spot: why SNI-based rules can silently stop matching and what you need as a backstop
+How to roll out in alert/count mode first, capture a full week of egress patterns to CloudWatch, and flip rule groups to drop one at a time
+Pricing gotcha: endpoint hours per AZ plus data processed means centralized inspection is cheaper, but you must size for combined peak across all VPCs
+
+Keywords: AWS Network Firewall interview questions, TLS SNI egress filtering, centralized inspection VPC, cloud security engineer interview, data exfiltration AWS
+
+🎧 Listen, then go deeper — DevOps & Cloud interview-prep ebooks at DevOpsInterview.Cloud
+▶ Daily 30-second interview drills: DevOps Interview Cloud on YouTube
+
+Transcript
+
+Security just sent you a ticket. Block all unexpected egress across every VPC. No more instances calling out to random IPs on the internet. Sounds simple until you realize your build servers pull from package registries, your app calls three SaaS APIs, and nobody has a full list of what's actually supposed to be leaving the network. Ship the wrong rule set and you either miss real exfiltration paths, or you break a deploy at two in the morning and get paged for it.
+
+This question shows up in senior DevOps and cloud security interviews because it tests three things at once. Can you design for centralized inspection instead of bolting a firewall onto every VPC. Do you understand the tradeoff between IP-based and domain-based filtering. And do you have a rollout process that doesn't nuke production traffic on day one. Anyone can say "add a firewall." Fewer people can explain why it goes in one place, and how you prove it's safe before you flip it to blocking mode.
+
+Start with the mental model. In a multi-VPC setup, you do not want AWS Network Firewall deployed separately in every spoke VPC. That's operationally painful, it's expensive, and every team ends up writing slightly different rules. The standard pattern is a centralized inspection VPC, sitting between your spoke VPCs and the internet, usually paired with AWS Transit Gateway. Every spoke VPC routes its default egress through the transit gateway to the inspection VPC. The firewall endpoints live there, traffic gets inspected once, using one shared rule set, and then it's routed out through a NAT gateway to the internet.
+
+The firewall itself has two kinds of rules. Stateless rules operate on packet headers, source and destination IP, ports, protocol. They're fast, but they don't know anything about the content or the destination domain. Stateful rules track connections and can inspect protocol details, and this is where domain filtering comes in. AWS Network Firewall supports domain-based stateful rules using the HOME_NET and TLS SNI, the Server Name Indication field. Since most traffic is encrypted, the firewall reads the SNI in the TLS handshake to figure out what domain a connection is headed to, without decrypting the actual payload.
+
+Here's the walkthrough security actually wants. Instead of writing rules like "allow this IP range," which breaks the moment a SaaS vendor rotates their infrastructure behind a content delivery network, you write domain allow lists. Something like: allow egress to star dot amazonaws dot com, star dot github dot com, star dot pypi dot org, your internal artifact registry domain, and your approved SaaS endpoints like star dot datadoghq dot com. Everything else on port 443 and port 80 gets dropped by a default deny rule at the bottom of the rule group. That's the actual control that stops exfiltration. An attacker who compromises a workload can't just open a connection to some random domain and quietly ship data out, because the SNI doesn't match anything on the allow list and the connection gets reset.
+
+A concrete example: say you've got an application VPC running ECS tasks that call out to a payments API and pull container images from Amazon ECR. You'd build a stateful rule group with domain list rules, action equals pass, targeting star dot amazonaws dot com for ECR and S3 access, plus the specific payments vendor domain. Then a second rule group, lower priority, with a drop-all rule for anything else on 443. You attach both rule groups to a firewall policy, and that policy gets applied to the firewall in the inspection VPC. Every spoke VPC's route table sends 0.0.0.0/0 traffic to the transit gateway attachment for the inspection VPC, so nothing bypasses the firewall.
+
+Now the tradeoffs, because this is where people get burned. Domain filtering by SNI only works for standard TLS on the usual ports, and only if the client isn't using something like encrypted client hello, which hides the SNI entirely. If a vendor rolls out ECH, your domain rule silently stops matching and either everything from them gets blocked, or worse, it falls through some overly broad rule you added while troubleshooting. You also can't domain-filter plain HTTP or arbitrary custom ports the same way, so you still need IP or port-based stateless rules as a backstop for non-standard traffic, like a database replication port or a syslog forwarder hitting a fixed IP.
+
+Cost and scale matter too. Network Firewall pricing is based on endpoint hours per availability zone plus data processed, so centralizing it in one inspection VPC is cheaper than deploying it per spoke VPC, but you're also creating a single choke point. Size your endpoints for peak traffic across all VPCs combined, not just one team's workload, or you'll see latency spikes during deploys when everyone's pulling images at once.
+
+The rollout process is the part that saves you from an outage. Never go straight to a default-deny domain policy in a live account. Start in alert mode, sometimes called count mode, where the firewall logs what it would have blocked without actually dropping it. Ship those logs to CloudWatch or S3, run them for at least a full business cycle, ideally including a deploy day, a patch day, and a batch job day, because those all have different egress patterns. Build your domain allow list from that real traffic, not from what people think they're calling. Then flip specific rule groups from alert to drop one at a time, watch error rates and application logs, and keep a documented rollback, which just means removing that rule group from the policy or reverting the route table change on the spoke VPC.
+
+Common wrong answers you'll hear in interviews. One: "just use security groups." Security groups are IP and port based, they don't understand domains, and CDN-fronted SaaS traffic breaks them constantly. Two: "deploy Network Firewall in every VPC." Technically works, but it's expensive, hard to keep consistent, and it's not what "centralized inspection" architecture means when an interviewer asks for it. Three: "block everything by IP range from threat intel feeds." That catches known-bad infrastructure but does nothing against a compromised workload calling out to a brand-new domain that hasn't been flagged yet, which is exactly the exfiltration scenario security is worried about. Four: forgetting DNS. If you don't also control DNS resolution, or at least log it through Route 53 Resolver query logging, attackers can tunnel data through DNS queries themselves, which a domain-based TLS rule won't ever see.
+
+Quick recap. Centralize AWS Network Firewall in a dedicated inspection VPC, route all spoke VPC egress through transit gateway into it. Use stateful domain-based rules keyed off TLS SNI for an allow list of legitimate destinations, backed by stateless IP and port rules for non-TLS or fixed-port traffic. Roll out in alert mode first, build your allow list from real traffic patterns across a full business cycle, then convert to drop mode one rule group at a time. Watch for encrypted client hello breaking SNI matching, and don't forget DNS query logging as a second exfiltration channel outside the firewall's visibility.
+
+If you want the full written version of this, with the actual rule group syntax and a rollout checklist you can bring into an interview or a real migration, it's all laid out over at devopsinterview dot cloud.]]></description>
+      <enclosure url="https://devopsinterviewcloud.github.io/podcast-feed/audio/episode_20260909.mp3" length="7937087" type="audio/mpeg"/>
+      <itunes:duration>00:08:16</itunes:duration>
+      <itunes:explicit>false</itunes:explicit>
+      <itunes:image href="https://devopsinterviewcloud.github.io/podcast-feed/art/episode_20260909.jpg"/>
+    </item>
+    <item>
+      <title>CoreDNS at 100K RPS: ndots, Negative Caching, and Autopath</title>
+      <guid isPermaLink="false">devopsinterviewcloud.podbean.com/61f7afa5-1145-593e-b3c1-a9978c2ab069</guid>
+      <pubDate>Sun, 30 Aug 2026 16:07:38 +0000</pubDate>
+      <description><![CDATA[A real-world CoreDNS latency incident at high query volume reveals how ndots and Kubernetes search domains silently multiply DNS lookups into a full-blown query storm.
+
+You'll learn:
+
+Why a single external hostname like api.stripe.com generates 4 upstream queries under Kubernetes' default ndots:5 — and how that 4x amplifier compounds at scale
+How to override search behavior per-pod via dnsConfig.ndots, and why a trailing dot in your FQDN collapses four queries into one
+Tuning the CoreDNS cache plugin: setting denial TTLs high enough that NXDOMAIN responses actually stick, and the staleness tradeoff you must articulate in interviews
+What the autopath plugin actually does differently — moving search-path resolution server-side — and when it helps versus when it shifts the problem
+Why interviewers use this question to separate engineers who've read the docs from those who've debugged a DNS storm at 3am
+
+Keywords: CoreDNS tuning, Kubernetes DNS ndots, negative caching NXDOMAIN, CoreDNS cache plugin, Kubernetes networking interview
+
+🎧 Listen, then go deeper — DevOps & Cloud interview-prep ebooks at DevOpsInterview.Cloud
+▶ Daily 30-second interview drills: DevOps Interview Cloud on YouTube
+
+Transcript
+
+Picture this. Your cluster is doing something like a hundred thousand requests per second across a few hundred services, and suddenly every outbound call to a third-party API starts timing out intermittently. Nothing in your application changed. No deploy went out. But your p99 latency for anything that touches DNS resolution just tripled, and your CoreDNS pods are pegged at max CPU. This is a real failure pattern, and it almost always traces back to two things: how ndots is configured in every pod's resolver, and how CoreDNS is caching, or failing to cache, negative responses.
+
+Interviewers ask about this because it separates people who've read the Kubernetes docs from people who've actually had to explain a production DNS storm to their team. Anyone can say 'CoreDNS handles DNS in the cluster.' Far fewer people can explain why a single hostname lookup can turn into four or five actual queries hitting your DNS servers, and what that does to your query volume when you're already running near capacity. This question tests whether you understand resolution mechanics, not just that a service called CoreDNS exists.
+
+Here's the mental model. Every pod in a Kubernetes cluster gets a resolv.conf file, and that file has two important settings: a search list and an ndots value. The search list typically looks like namespace dot svc dot cluster dot local, then svc dot cluster dot local, then cluster dot local, and depending on your cloud provider, maybe an additional domain from the node itself. The ndots value, five by default in Kubernetes, tells the resolver: if the name you're looking up has fewer than five dots in it, don't treat it as fully qualified. Instead, try appending each entry in the search list first, in order, before falling back to treating it as an absolute name.
+
+Now think about what that means for a completely ordinary external lookup, something like api dot stripe dot com. That name has two dots. Since two is less than the ndots threshold of five, the resolver assumes it might be a relative name inside your cluster. So it tries api dot stripe dot com dot your-namespace dot svc dot cluster dot local first. That fails, comes back NXDOMAIN. Then it tries api dot stripe dot com dot svc dot cluster dot local. Fails again. Then api dot stripe dot com dot cluster dot local. Fails again. Only on the fourth attempt does it try api dot stripe dot com as an absolute name, with a trailing dot, and finally succeeds.
+
+So a single application-level DNS call just became four queries hitting CoreDNS, three of which were guaranteed to fail. Now multiply that across your fleet. If you're doing a hundred thousand real DNS-triggering requests per second, and a meaningful chunk of those are external hostnames going through this same four-query pattern, your actual query volume against CoreDNS isn't a hundred thousand queries per second. It's closer to three hundred or four hundred thousand, most of it wasted work resolving things that were never going to exist in your cluster domain in the first place. That's the amplification, and it's the single biggest reason CoreDNS falls over under load that looks survivable on paper.
+
+There are two levers here, and good candidates know both. First, ndots itself. You can override the search behavior per pod using the dnsConfig field in the pod spec, setting ndots to something lower, like one, for workloads that mostly talk to external services. Or, simpler and often better, you just get your application code or your service mesh sidecar to use fully qualified domain names with a trailing dot for external calls, which bypasses the search list entirely regardless of ndots. That trailing dot is doing real work. It tells the resolver 'this is already absolute, skip the search list,' and it collapses four queries into one.
+
+The second lever is the CoreDNS cache plugin, and this is where negative caching becomes the interesting part. CoreDNS caches two kinds of answers: successful responses, and negative responses, meaning NXDOMAIN or NODATA results. By default, the cache plugin's denial caching, the negative cache, often runs with a fairly short TTL, sometimes as low as a handful of seconds depending on your Corefile. That means those three failed lookups per external hostname, the ones hitting cluster dot local variants, don't get cached long enough to actually help you. Every single request re-triggers the same failed chain.
+
+The fix is to explicitly tune the cache plugin in your Corefile. You want a reasonably generous success TTL, something like thirty seconds for internal service records that don't change often, and importantly you want to bump the denial TTL too, maybe to a similar range, so that once CoreDNS has established that api dot stripe dot com dot cluster dot local doesn't exist, it doesn't ask again for that window instead of on every single request. The tradeoff you have to talk about in an interview is staleness. If you cache negative responses for sixty seconds and then a service actually does get created with that exact name mid-window, clients will keep getting NXDOMAIN until the cache expires. For genuinely dynamic environments with frequent service creation, you tune this down. For stable production traffic patterns, you can afford to push it up and take the throughput win.
+
+This is also where autopath comes into the conversation, because interviewers like asking what it actually buys you versus just tuning ndots. Autopath is a CoreDNS plugin that moves the search path logic from the client side to the server side. Instead of the pod's resolver blindly firing off four sequential queries and waiting for each response before trying the next, autopath has CoreDNS itself walk the search list server-side and return the final correct answer in a single round trip from the client's perspective. From the pod's point of view, it looks like one query went out and one correct answer came back, even though CoreDNS internally still had to check multiple names.
+
+The honest tradeoff to mention here: autopath reduces client-observed latency and reduces the number of round trips over the network, but it doesn't eliminate the internal query cost inside CoreDNS, and it adds memory overhead per pod because it has to track pod IP to namespace mappings to know which search path applies. It also depends on the Kubernetes plugin being configured correctly, and it's had stability caveats across CoreDNS versions, so if you cite it in an interview, mention that you'd test it in a staging environment under real load before trusting it in a high-QPS production path. Combined with proper ndots tuning and cache tuning, it's a genuine option, but it's not a silver bullet you deploy blind.
+
+Let's talk about the wrong answers people give under pressure, because interviewers are listening for these. The first wrong answer is 'just scale up CoreDNS replicas.' That helps you survive the amplification, but it doesn't fix it. You're paying more compute to serve queries that shouldn't exist in the first place. The second wrong answer is 'disable DNS caching to get fresher answers.' That's backwards. You'd be removing the one thing protecting your upstream from repeated failed lookups. The third wrong answer, and this one sounds smart but isn't, is 'just increase CPU and memory limits on the CoreDNS pods.' That treats a query-volume problem as a resource problem. It buys you headroom, sure, but the moment traffic grows again, you're back in the same spiral, because the root cause, that four-to-one query amplification from ndots, is still sitting there untouched.
+
+So here's the thirty-second version. Under Kubernetes defaults, ndots five means any external hostname with fewer than five dots gets tried against your entire internal search domain before it's resolved as absolute, turning one lookup into four. Fix it by using fully qualified names with a trailing dot for external calls, or override ndots in dnsConfig for the workloads that need it. Tune the CoreDNS cache plugin's success and denial TTLs deliberately, don't just accept the defaults, because negative caching is what protects you from repeatedly re-querying names that don't exist. And consider autopath to collapse client-side search path queries into a single server-side lookup, understanding it trades some CoreDNS-side memory and complexity for lower client latency.
+
+If you want the full written version of this with the exact Corefile syntax, the dnsConfig YAML, and the follow-up questions interviewers tend to ask after this one, go grab the prep guide at devopsinterview dot cloud.]]></description>
+      <enclosure url="https://devopsinterviewcloud.github.io/podcast-feed/audio/episode_20260830.mp3" length="8862031" type="audio/mpeg"/>
+      <itunes:duration>00:09:13</itunes:duration>
+      <itunes:explicit>false</itunes:explicit>
+      <itunes:image href="https://devopsinterviewcloud.github.io/podcast-feed/art/episode_20260830.jpg"/>
+    </item>
+    <item>
+      <title>VPA vs HPA for Stateful Workloads: Autoscaler Deep Dive</title>
+      <guid isPermaLink="false">devopsinterviewcloud.podbean.com/4b39d058-1459-515e-9065-f646ab76e75f</guid>
+      <pubDate>Wed, 22 Jul 2026 11:34:55 +0000</pubDate>
+      <description><![CDATA[Your Cassandra node is getting evicted at 2 a.m. or your PostgreSQL replica is sitting on 4× the memory it needs — this episode breaks down exactly which autoscaler to reach for and why VPA vs HPA is a staple senior SRE interview question.
+
+You'll learn:
+
+Why HPA's scale-out model breaks for StatefulSets (token rings, replication slots, unacknowledged messages) and when vertical scaling is the only safe lever
+VPA's three components — recommender, admission controller, updater — and why update mode auto is the one that pages you at 2 a.m. for stateful workloads
+The safe progression: start in Off mode for two weeks, apply recommendations manually, then consider Initial mode — and why Auto is rarely worth it for anything with persistent state
+The HPA + VPA feedback loop failure: both watching CPU on the same workload, pod count oscillating, resource allocation in chaos
+The clean split that actually works: HPA on queue depth (custom metric), VPA managing memory requests — distinct signals, no interference
+
+Keywords: VPA vs HPA Kubernetes, vertical pod autoscaler stateful workloads, autoscaler SRE interview, HPA VPA conflict, Kubernetes StatefulSet autoscaling
+
+🎧 Listen, then go deeper — DevOps & Cloud interview-prep ebooks at DevOpsInterview.Cloud
+▶ Daily 30-second interview drills: DevOps Interview Cloud on YouTube
+
+Transcript
+
+Your stateful app is getting evicted every few hours, or it's sitting on four times the memory it actually needs, and you're not sure which autoscaler to reach for. That's the exact scenario interviewers love, because most candidates only know one half of the answer.
+
+Let's set the stage. You have a Cassandra node, a RabbitMQ broker, or a PostgreSQL read replica running in Kubernetes. It's a StatefulSet. Traffic is not uniform. Some days it's busy, some days it's quiet. Someone on your team says "just add HPA" and someone else says "we need VPA." Who's right? That question shows up in senior SRE and platform engineer interviews constantly, because the answer is not obvious and the wrong choice causes real incidents.
+
+Interviewers ask this because autoscaling is one of those topics where surface-level knowledge falls apart fast. Saying "HPA scales pods out, VPA scales pods up" is correct but incomplete. The follow-up is always: okay, so which one do you use for a stateful workload, and why? And then: what happens if you use both at the same time? If you can't answer those, you signal that you've only worked with stateless services.
+
+Here's the mental model you need. The HPA, the Horizontal Pod Autoscaler, works by changing the number of pod replicas. It watches a metric, CPU or memory or a custom one, and when that metric crosses a threshold it adds or removes pods. That works beautifully for stateless services. Each replica is identical, sessions don't matter, and spinning up a new pod behind a load balancer is invisible to users.
+
+Stateful workloads break that assumption. A Cassandra node owns a subset of the token ring. A RabbitMQ broker may hold unacknowledged messages. A PostgreSQL replica has an open replication slot. Adding a new pod doesn't instantly help because the new pod has to join the cluster, sync data, or acquire state before it can carry load. Scaling out fast is often dangerous. Scaling in is even worse because you might be removing a pod that holds data not yet replicated elsewhere.
+
+So for stateful workloads, the more useful lever is usually vertical. Give the existing pod more CPU or more memory so it can handle the load without needing a new replica. That's where the VPA, the Vertical Pod Autoscaler, comes in.
+
+VPA has three components. The recommender watches historical resource usage and calculates what your requests and limits should be. The admission controller patches those values into new pods at scheduling time. And the updater, this is the dangerous one, can evict running pods so they restart with the new resource values. The key knob is the update mode, and this is a common interview question on its own.
+
+Update mode off means the VPA only calculates recommendations. It never touches your pods. You query the VPA object and apply changes yourself. This is the right starting point for any stateful workload. You get the data without the risk.
+
+Update mode initial means the admission controller sets resource values when a pod is first created, but the VPA never evicts a running pod. The pod keeps whatever resources it started with until it's naturally replaced, for example during a rollout. This is a reasonable middle ground for apps that tolerate restarts as part of deployments but not random evictions.
+
+Update mode auto, and this is the one that bites teams, allows the VPA updater to evict pods at any time to apply new recommendations. For a stateless deployment this is often fine. For a stateful pod it can be catastrophic. Imagine your primary Redis instance getting evicted at two in the morning because the VPA decided it needed fifty percent more memory. The pod comes back, but during those thirty seconds of restart your application is throwing errors.
+
+The fourth mode, recreate, behaves like auto but only triggers on pod creation events. In practice most teams treat auto and recreate as the same risk category for stateful workloads.
+
+So the concrete recommendation for stateful apps is: start with update mode off, run it for at least two weeks to cover your traffic patterns, look at the recommended requests in the VPA status, and then apply those values manually to your StatefulSet spec. After you've done that once and confirmed stability, you can consider bumping to initial mode. Staying in auto is rarely worth it for anything with persistent state.
+
+Now the tricky part that interviewers really test: can you run HPA and VPA at the same time?
+
+The short answer is yes, but only if they're watching different metrics. The classic failure pattern is enabling both on the same workload with both watching CPU. Here's what happens. Load increases. CPU goes up. HPA adds a replica. The CPU per pod drops because the load is now spread. VPA sees lower per-pod CPU and recommends lower requests. It either tells you to reduce requests or, in auto mode, evicts pods to resize them down. Meanwhile HPA is still watching the same CPU signal. You get a feedback loop where both controllers are fighting each other, your pod count oscillates, and your resource allocation is unstable.
+
+The safe combination is to give each controller a distinct domain. A common pattern for a message broker is to let HPA scale on queue depth, a custom metric from your metrics pipeline, while VPA manages the memory requests because memory usage on a broker tends to grow with configuration and message size rather than with load spikes. They're watching completely different signals so they don't interfere.
+
+Another safe pattern is to disable HPA entirely and rely only on VPA in initial mode, pairing that with a PodDisruptionBudget, the PDB, to prevent the cluster autoscaler from removing nodes that would orphan your pods. This is common for single-instance stateful workloads where horizontal scaling genuinely isn't possible.
+
+Let's talk real numbers briefly so you sound credible in the interview. A typical starting point for a moderately loaded RabbitMQ broker might be two hundred and fifty millicores CPU request and five hundred millicores limit, with one gigabyte memory request and two gigabytes limit. After running VPA in off mode for two weeks under normal traffic, you might see the recommender suggesting six hundred millicores CPU and one and a half gigabytes memory. That gap between what you provisioned and what you actually need is exactly the over-provisioning problem VPA is designed to solve. Without it, you're just guessing.
+
+On the eviction risk side, the VPA updater respects PodDisruptionBudgets. If your PDB says zero pods unavailable, the updater will not evict your pod even in auto mode. So if you are running VPA auto on a StatefulSet, always pair it with a PDB that reflects your actual availability requirements. This is a detail that separates strong answers from weak ones in interviews.
+
+There's also the resource policy inside the VPA spec itself. You can set min allowed and max allowed values per container so the recommender can't suggest something absurd. For example, you can tell it to never recommend less than one hundred millicores or more than four cores, keeping the recommendations inside bounds your infrastructure can actually handle. Always set these bounds for production workloads.
+
+One more wrinkle worth knowing. VPA and HPA cannot both target CPU or memory requests at the same time because HPA uses requests as the denominator for its utilization calculation. If VPA changes the request value, the HPA's target threshold shifts underneath it. The percentage-based math breaks. Kubernetes has a known limitation here, and the official guidance is to not use HPA on CPU or memory when VPA is also active on the same workload, unless you're using HPA with custom or external metrics only.
+
+Common wrong answers you want to avoid. The first is saying "just use HPA for everything, stateful or not." That ignores the data ownership and sync cost of scaling stateful replicas. The second is saying "VPA is dangerous so never use it." That's overcorrecting. VPA in off or initial mode is genuinely useful and low risk. The third is conflating pod autoscaling with cluster autoscaling. The cluster autoscaler adds nodes. VPA and HPA manage pods within existing nodes. They work at different layers and you need to be clear about which layer you're talking about. The fourth is not mentioning PodDisruptionBudgets when discussing VPA auto mode. Experienced interviewers will notice that gap immediately.
+
+Quick recap. For stateful workloads, your default should be VPA in off mode to gather recommendations, and then apply them manually. Use initial mode once you trust the recommendations]]></description>
+      <enclosure url="https://devopsinterviewcloud.github.io/podcast-feed/audio/episode_20260722.mp3" length="9775272" type="audio/mpeg"/>
+      <itunes:duration>00:10:10</itunes:duration>
+      <itunes:explicit>false</itunes:explicit>
+      <itunes:image href="https://devopsinterviewcloud.github.io/podcast-feed/art/episode_20260722.jpg"/>
+    </item>
+    <item>
+      <title>Kubernetes Scheduler Extenders: Custom Placement Logic</title>
+      <guid isPermaLink="false">devopsinterviewcloud.podbean.com/e3343d4f-8299-5959-ae76-476966526f9e</guid>
+      <pubDate>Wed, 15 Jul 2026 11:33:34 +0000</pubDate>
+      <description><![CDATA[Learn how to write a Kubernetes scheduler extender webhook that restricts GPU pods to nodes with NVLink interconnects. This episode covers the extender contract, KubeSchedulerConfiguration registration, filter and prioritize endpoints, and the latency tradeoffs interviewers probe in senior SRE and platform engineering interviews.
+
+Full interview prep guides and scenario walkthroughs: DevOpsInterview.Cloud]]></description>
+      <enclosure url="https://devopsinterviewcloud.github.io/podcast-feed/audio/episode_20260715.mp3" length="9223148" type="audio/mpeg"/>
+      <itunes:duration>00:09:36</itunes:duration>
+      <itunes:explicit>false</itunes:explicit>
+      <itunes:image href="https://devopsinterviewcloud.github.io/podcast-feed/art/episode_20260715.jpg"/>
+    </item>
+    <item>
+      <title>The Kubernetes Machine: From kubectl apply to Running Containers</title>
+      <guid isPermaLink="false">devopsinterviewcloud.podbean.com/4a0d10e7-31dc-3ac6-af3d-b95d45077c35</guid>
+      <pubDate>Sun, 12 Jul 2026 03:55:35 +0000</pubDate>
+      <description><![CDATA[What really happens when you run kubectl apply?
+
+In Part 1 of this Kubernetes masterclass, we go far beyond basic definitions and trace how Kubernetes works as a distributed, API-driven control system.
+
+You will learn how a YAML manifest moves through kubectl, the API server, authentication, authorization, admission, etcd, controllers, the scheduler, kubelet and the container runtime before finally becoming a running Pod.
+
+This episode also explains the deeper ideas that make Kubernetes work:
+
+
+Desired state versus observed state
+Reconciliation loops
+spec versus status
+Watches and events
+Labels and selectors
+ReplicaSets and Deployments
+Scheduling decisions
+Pod lifecycle
+Owner references, finalizers and garbage collection
+Server-side apply and field ownership
+
+By the end of this episode, you will be able to mentally replay the complete journey from user intent to a healthy running workload—and understand which component is responsible at every step.
+
+Mental model:
+
+Intent → Store → Observe → Reconcile
+
+Full interview prep guides and scenario walkthroughs: DevOpsInterview.Cloud]]></description>
+      <enclosure url="https://devopsinterviewcloud.github.io/podcast-feed/audio/ep_20260712_1000776424075.m4a" length="52416603" type="audio/x-m4a"/>
+      <itunes:duration>00:54:01</itunes:duration>
+      <itunes:explicit>false</itunes:explicit>
+    </item>
+    <item>
+      <title>Cluster Autoscaler vs Karpenter: Choosing at 500 Nodes</title>
+      <guid isPermaLink="false">devopsinterviewcloud.podbean.com/5d943d8e-4ec4-58c7-836a-a59c7c3f6226</guid>
+      <pubDate>Wed, 08 Jul 2026 11:32:45 +0000</pubDate>
+      <description><![CDATA[Most engineers assume Karpenter is always the right answer for Kubernetes node autoscaling, but at 500 nodes the tradeoffs around ASG lock-in, provisioner complexity, and migration risk get serious. This episode breaks down when to keep Cluster Autoscaler, when Karpenter wins, and how to articulate both sides clearly in a senior DevOps or SRE interview. Covers real configuration details, scaling latency numbers, and common wrong answers interviewers flag.
+
+Full interview prep guides and scenario walkthroughs: DevOpsInterview.Cloud]]></description>
+      <enclosure url="https://devopsinterviewcloud.github.io/podcast-feed/audio/episode_20260708.mp3" length="10181528" type="audio/mpeg"/>
+      <itunes:duration>00:10:36</itunes:duration>
+      <itunes:explicit>false</itunes:explicit>
+      <itunes:image href="https://devopsinterviewcloud.github.io/podcast-feed/art/episode_20260708.jpg"/>
+    </item>
+    <item>
+      <title>OOMKilled at Scale: Tuning JVM Heap in Kubernetes</title>
+      <guid isPermaLink="false">devopsinterviewcloud.podbean.com/bdaa794a-ab17-5496-992f-2e35c2287ffe</guid>
+      <pubDate>Sun, 05 Jul 2026 03:07:46 +0000</pubDate>
+      <description><![CDATA[A Java service keeps getting OOMKilled in Kubernetes even though memory requests look fine on paper. This episode explains why JVM heap defaults ignore container limits, how to set maximum heap size correctly, and what interviewers expect when they probe your understanding of Java memory in containerized environments. Covers Xmx flags, UseContainerSupport, native memory overhead, and the tradeoffs between requests and limits.
+
+Full interview prep guides and scenario walkthroughs: DevOpsInterview.Cloud]]></description>
+      <enclosure url="https://devopsinterviewcloud.github.io/podcast-feed/audio/episode_20260704.mp3" length="10354563" type="audio/mpeg"/>
+      <itunes:duration>00:10:47</itunes:duration>
+      <itunes:explicit>false</itunes:explicit>
+      <itunes:image href="https://devopsinterviewcloud.github.io/podcast-feed/art/episode_20260704.jpg"/>
+    </item>
+    <item>
+      <title>Karpenter Spot Interruption: Fallback &amp; Graceful Drain</title>
+      <guid isPermaLink="false">devopsinterviewcloud.podbean.com/96d74658-c3e3-3eb7-9cae-208a31f803a8</guid>
+      <pubDate>Sat, 04 Jul 2026 12:32:35 +0000</pubDate>
+      <description><![CDATA[When AWS fires the 2-minute Spot reclaim notice, Karpenter's interruption queue is the difference between a blip and a batch job disaster — here's exactly how to configure it.
+
+You'll learn:
+
+How to set karpenter.sh/capacity-type in a NodePool to prefer Spot with automatic On-Demand fallback
+The full interruption flow: SQS queue → cordon → graceful drain → pod rescheduling, all within the 2-minute window
+Why the order of values in the capacity-type array doesn't control selection — Karpenter uses price-capacity optimization
+When to use strict values: ['spot'] and what happens when capacity dries up
+Why Pod Disruption Budgets and gracefulTerminationPeriod are non-negotiable for fault-tolerant batch workloads
+
+Keywords: Karpenter Spot interruption handling, Spot instance fallback on-demand, NodePool capacity type configuration, Kubernetes batch workload cost optimization, Spot 2-minute warning drain
+
+🎧 Listen, then go deeper — DevOps & Cloud interview-prep ebooks at DevOpsInterview.Cloud]]></description>
+      <enclosure url="https://devopsinterviewcloud.github.io/podcast-feed/audio/ep_20260704_1000775440641.m4a" length="32852293" type="audio/x-m4a"/>
+      <itunes:duration>00:33:51</itunes:duration>
+      <itunes:explicit>false</itunes:explicit>
+    </item>
+    <item>
+      <title>Canary Analysis for Flink Streaming: Prometheus, Loki &amp; Pyroscope</title>
+      <guid isPermaLink="false">devopsinterviewcloud.podbean.com/acfdbc07-6bbe-373d-81e3-10b4710d1cf4</guid>
+      <pubDate>Sat, 04 Jul 2026 12:10:52 +0000</pubDate>
+      <description><![CDATA[Automated canary analysis for a Flink-based streaming app is a common senior SRE interview scenario — here's how to wire Prometheus, Loki, and Pyroscope into a production-grade rollout strategy.
+
+You'll learn:
+
+How to define canary success criteria using Prometheus metrics like consumer lag, throughput, and error rate on Flink jobs
+Using Loki log queries to surface structured errors in canary vs. baseline deployments side-by-side
+Continuous profiling with Pyroscope to catch CPU or memory regressions in the new Flink version before full rollout
+How automated analysis gates work — failing fast vs. baking time — and how to articulate the tradeoff in an interview
+Stitching observability signals into a single canary decision: pass, fail, or inconclusive
+
+Keywords: canary deployment Flink, automated canary analysis SRE, Prometheus Loki Pyroscope, streaming app observability, DevOps interview questions
+
+🎧 Listen, then go deeper — DevOps & Cloud interview-prep ebooks at DevOpsInterview.Cloud]]></description>
+      <enclosure url="https://devopsinterviewcloud.github.io/podcast-feed/audio/ep_20260704_1000775439911.m4a" length="17941816" type="audio/x-m4a"/>
+      <itunes:duration>00:18:29</itunes:duration>
+      <itunes:explicit>false</itunes:explicit>
+    </item>
+    <item>
+      <title>Grafana Mimir Storage: Tiered S3 at 10TB/day</title>
+      <guid isPermaLink="false">devopsinterviewcloud.podbean.com/a8f6ceb6-5899-3335-95b6-6127cfaae293</guid>
+      <pubDate>Sat, 04 Jul 2026 03:40:24 +0000</pubDate>
+      <description><![CDATA[Grafana Mimir storage at 10TB/day scale forces real trade-offs — here's how to configure tiered storage to S3 without bleeding cost or tanking query performance.
+
+You'll learn:
+
+How Mimir's store-gateway and compactor interact with S3-backed object storage at high ingest volume
+Configuring blocks_storage with tiered retention — keeping hot blocks in fast storage while offloading cold blocks to S3 Glacier-compatible tiers
+Tuning compaction schedules and chunk caching (memcached) to reduce S3 GET costs under sustained 10TB/day ingest
+Common pitfalls: misconfigured bucket lifecycle policies, compactor overlap errors, and index cache misses killing query latency
+Sizing ruler and alertmanager storage separately so they don't contend with block storage I/O
+
+Keywords: Grafana Mimir S3 storage, Mimir tiered storage config, Mimir compactor tuning, metrics storage at scale, Mimir blocks_storage
+
+🎧 Listen, then go deeper — DevOps & Cloud interview-prep ebooks at DevOpsInterview.Cloud]]></description>
+      <enclosure url="https://devopsinterviewcloud.github.io/podcast-feed/audio/ep_20260704_1000775412233.m4a" length="13199695" type="audio/x-m4a"/>
+      <itunes:duration>00:13:36</itunes:duration>
+      <itunes:explicit>false</itunes:explicit>
+    </item>
+    <item>
+      <title>SLO Error Budget Burn Rate: Azure Zone Outage Math</title>
+      <guid isPermaLink="false">devopsinterviewcloud.podbean.com/095f358c-a142-38b7-81c9-28116bdda147</guid>
+      <pubDate>Wed, 24 Jun 2026 02:58:34 +0000</pubDate>
+      <description><![CDATA[If your service has a 99.99% SLO and Azure drops a zone for 15 minutes, here's exactly how to calculate the error budget burn rate before your next SRE interview.
+
+You'll learn:
+
+How to derive total monthly error budget from a 99.99% SLO (~4.38 minutes/month)
+Why a 15-minute outage consumes roughly 3.4x your entire monthly budget — and how to show that math
+The burn rate formula interviewers expect: burn rate = error rate / (1 − SLO target)
+How fast vs. slow burn rates map to alerting windows in Google's SRE workbook approach
+Common gotchas: partial zone failures, dependency blame, and how to frame mitigation in your answer
+
+Keywords: SLO error budget burn rate, Azure availability zone outage, SRE interview questions, error budget calculation, 99.99 SLO math
+
+🎧 Listen, then go deeper — DevOps & Cloud interview-prep ebooks at DevOpsInterview.Cloud]]></description>
+      <enclosure url="https://devopsinterviewcloud.github.io/podcast-feed/audio/ep_20260624_1000773973189.m4a" length="10661916" type="audio/x-m4a"/>
+      <itunes:duration>00:10:59</itunes:duration>
+      <itunes:explicit>false</itunes:explicit>
+    </item>
+    <item>
+      <title>PCI-DSS Serverless Payments on GCP: Confidential VMs, CEKM &amp; Binary Authorization</title>
+      <guid isPermaLink="false">devopsinterviewcloud.podbean.com/07755f81-9aaf-3add-80a3-ae7848b7483e</guid>
+      <pubDate>Tue, 23 Jun 2026 04:05:12 +0000</pubDate>
+      <description><![CDATA[Designing a PCI-DSS compliant serverless payments architecture on GCP means getting Confidential VMs, Cloud External Key Manager, and Binary Authorization working together — here's how to answer that in a senior interview.
+
+You'll learn:
+
+How Confidential VMs provide hardware-level memory encryption to satisfy PCI-DSS data-in-use requirements
+Why Cloud External Key Manager (CEKM) lets you hold encryption keys outside GCP's control — and what that means for scope reduction
+How Binary Authorization enforces cryptographic attestation so only verified container images reach your payment workloads
+The serverless boundary decisions (Cloud Run vs bare GKE) that affect your Cardholder Data Environment scope
+Common interview gotchas around shared responsibility, audit logging with Cloud Audit Logs, and VPC Service Controls for perimeter defence
+
+Keywords: PCI-DSS GCP architecture, Confidential VMs interview, Cloud External Key Manager, Binary Authorization Cloud Run, serverless payments compliance
+
+🎧 Listen, then go deeper — DevOps & Cloud interview-prep ebooks at DevOpsInterview.Cloud]]></description>
+      <enclosure url="https://devopsinterviewcloud.github.io/podcast-feed/audio/ep_20260623_1000773832504.m4a" length="17841529" type="audio/x-m4a"/>
+      <itunes:duration>00:18:23</itunes:duration>
+      <itunes:explicit>false</itunes:explicit>
+    </item>
+    <item>
+      <title>Cross-Account EKS with AWS CDK: VPC Peering and Transit Gateway</title>
+      <guid isPermaLink="false">devopsinterviewcloud.podbean.com/abefd123-ef50-3986-a183-84fdcb279f4e</guid>
+      <pubDate>Tue, 23 Jun 2026 03:55:21 +0000</pubDate>
+      <description><![CDATA[Deploying EKS clusters across AWS accounts with CDK is a common senior interview scenario — here's how to handle VPC peering, Transit Gateway attachments, and IAM trust policies correctly.
+
+You'll learn:
+
+How to structure a multi-account CDK app using Stacks across environments with explicit env account/region targets
+When to use VPC peering vs Transit Gateway for cross-account EKS network connectivity, and the trade-offs at scale
+How to wire up Transit Gateway attachments and route table propagation so worker nodes can reach shared services
+Cross-account IAM role assumptions and EKS RBAC config required for cluster access from a management account
+Common CDK gotchas: bootstrap trust policies, asset S3 bucket permissions, and cross-account CFN execution roles
+
+Keywords: cross-account EKS CDK, AWS Transit Gateway EKS, VPC peering Kubernetes, multi-account EKS architecture, AWS CDK EKS interview
+
+🎧 Listen, then go deeper — DevOps & Cloud interview-prep ebooks at DevOpsInterview.Cloud]]></description>
+      <enclosure url="https://devopsinterviewcloud.github.io/podcast-feed/audio/ep_20260623_1000773831541.m4a" length="13367308" type="audio/x-m4a"/>
+      <itunes:duration>00:13:46</itunes:duration>
+      <itunes:explicit>false</itunes:explicit>
+    </item>
+    <item>
+      <title>OpenTelemetry + CloudWatch Logs Insights: Tracing Serverless Apps</title>
+      <guid isPermaLink="false">devopsinterviewcloud.podbean.com/ba146499-6979-3ba1-a8d6-a78dbb87a2b3</guid>
+      <pubDate>Sun, 21 Jun 2026 12:08:49 +0000</pubDate>
+      <description><![CDATA[Correlating OpenTelemetry traces with CloudWatch Logs Insights across Lambda and Step Functions is a common senior interview scenario — here's exactly how to answer it.
+
+You'll learn:
+
+How to propagate trace context (W3C TraceContext headers) across Lambda invocations and Step Functions state transitions so trace IDs land in your structured logs
+Configuring the AWS Distro for OpenTelemetry (ADOT) Lambda layer to auto-instrument functions without cold-start penalties
+Writing CloudWatch Logs Insights queries that join on trace_id to reconstruct an end-to-end execution timeline across services
+Where correlation breaks — async Step Functions callbacks, missing X-Amzn-Trace-Id propagation, and log sampling mismatches
+Trade-offs between ADOT, X-Ray native SDK, and a third-party collector like the OpenTelemetry Collector on Fargate
+
+Keywords: OpenTelemetry Lambda tracing, CloudWatch Logs Insights trace correlation, ADOT Step Functions, serverless observability interview questions
+
+🎧 Listen, then go deeper — DevOps & Cloud interview-prep ebooks at DevOpsInterview.Cloud]]></description>
+      <enclosure url="https://devopsinterviewcloud.github.io/podcast-feed/audio/ep_20260621_1000773601997.m4a" length="17956026" type="audio/x-m4a"/>
+      <itunes:duration>00:18:30</itunes:duration>
+      <itunes:explicit>false</itunes:explicit>
+    </item>
+    <item>
+      <title>Terraform State Splitting: terraform state rm + moved Blocks</title>
+      <guid isPermaLink="false">devopsinterviewcloud.podbean.com/a108fc18-c37d-31ca-9343-3e824d18aea3</guid>
+      <pubDate>Sun, 21 Jun 2026 04:06:53 +0000</pubDate>
+      <description><![CDATA[Splitting a monolithic 4GB Terraform state file into scoped microstates is one of the nastiest live-infrastructure challenges you'll face — here's how to do it without downtime using terraform state rm and moved blocks.
+
+You'll learn:
+
+Why state files balloon past 4GB and why that breaks plan/apply performance
+How to use terraform state rm to surgically extract resources without destroying them
+Using moved blocks to re-home resources into child state backends cleanly
+Sequencing the migration to avoid drift, lock contention, and accidental deletes
+How to validate microstate integrity with terraform state list and targeted plans before cutting over
+
+Keywords: terraform state splitting, terraform state rm, moved blocks terraform, monorepo to microstate migration, terraform refactor interview
+
+🎧 Listen, then go deeper — DevOps & Cloud interview-prep ebooks at DevOpsInterview.Cloud]]></description>
+      <enclosure url="https://devopsinterviewcloud.github.io/podcast-feed/audio/ep_20260621_1000773575716.m4a" length="19519774" type="audio/x-m4a"/>
+      <itunes:duration>00:20:06</itunes:duration>
+      <itunes:explicit>false</itunes:explicit>
+    </item>
+    <item>
+      <title>Monorepo CI at Scale: Bazel Caching for 1,000 Microservices</title>
+      <guid isPermaLink="false">devopsinterviewcloud.podbean.com/332041a9-6f10-35cb-a66e-5bf4a97b9140</guid>
+      <pubDate>Sat, 20 Jun 2026 12:48:33 +0000</pubDate>
+      <description><![CDATA[Designing a monorepo CI pipeline that doesn't collapse under 1,000 microservices means getting Bazel remote caching and selective test execution right from the start.
+
+You'll learn:
+
+How to structure a monorepo CI pipeline so only affected services trigger builds — using Bazel's dependency graph to compute the minimal affected set
+Configuring Bazel remote caching (local cache, shared remote cache via gRPC or HTTP) to avoid rebuilding unchanged targets across parallel CI workers
+Selective testing strategies: combining bazel query with --build_event_stream to identify and run only impacted test targets
+Common failure modes at scale — cache poisoning, overly broad BUILD file dependencies, and flaky remote executor connections
+How to structure the CI orchestration layer (GitHub Actions, Buildkite, or Tekton) to fan out Bazel shards without thrashing the remote cache
+
+Keywords: monorepo CI pipeline, Bazel remote caching, selective testing microservices, CI at scale DevOps interview, platform engineering build systems
+
+🎧 Listen, then go deeper — DevOps & Cloud interview-prep ebooks at DevOpsInterview.Cloud]]></description>
+      <enclosure url="https://devopsinterviewcloud.github.io/podcast-feed/audio/ep_20260620_1000773522225.m4a" length="19700769" type="audio/x-m4a"/>
+      <itunes:duration>00:20:18</itunes:duration>
+      <itunes:explicit>false</itunes:explicit>
+    </item>
+    <item>
+      <title>Azure RBAC with Pulumi: Dynamic Roles from YAML</title>
+      <guid isPermaLink="false">devopsinterviewcloud.podbean.com/8efd89a0-4dd8-38e2-98da-dc7c3ef6328a</guid>
+      <pubDate>Sat, 20 Jun 2026 12:33:40 +0000</pubDate>
+      <description><![CDATA[Learn how to generate dynamic Azure RBAC role assignments using Pulumi with YAML-driven definitions — including tag-scoped conditions like restricting storage access to env:prod resources only.
+
+You'll learn:
+
+How to define custom Azure RBAC roles in YAML and hydrate them through Pulumi's automation layer
+Using condition and conditionVersion fields in role assignments to enforce attribute-based access control (ABAC)
+Scoping storage permissions to resources matching specific tag key/value pairs at assignment time
+Structuring Pulumi component resources so YAML definitions stay DRY across multiple environments
+Common gotchas: condition syntax errors, propagation delays, and principal vs. scope mismatches
+
+Keywords: Azure RBAC Pulumi, dynamic role assignments Azure, Pulumi YAML infrastructure, Azure ABAC tag conditions, custom RBAC roles interview
+
+🎧 Listen, then go deeper — DevOps & Cloud interview-prep ebooks at DevOpsInterview.Cloud]]></description>
+      <enclosure url="https://devopsinterviewcloud.github.io/podcast-feed/audio/ep_20260620_1000773521828.m4a" length="17155783" type="audio/x-m4a"/>
+      <itunes:duration>00:17:40</itunes:duration>
+      <itunes:explicit>false</itunes:explicit>
+    </item>
+    <item>
+      <title>Prometheus Cardinality: Cutting 10M Series to 500K for Istio</title>
+      <guid isPermaLink="false">devopsinterviewcloud.podbean.com/ea1300f6-77d4-3b49-8370-ac9d50648570</guid>
+      <pubDate>Wed, 17 Jun 2026 13:01:56 +0000</pubDate>
+      <description><![CDATA[Taming Prometheus cardinality explosion in an Istio service mesh — dropping from 10 million to 500K active series using relabel_configs and recording rules — is exactly the kind of production war story senior SRE interviews dig into.
+
+You'll learn:
+
+Why Istio telemetry generates cardinality explosions and which high-cardinality labels (source_workload, destination_service, pod IPs) are the usual culprits
+How to use metric_relabel_configs to drop or rewrite labels before series are ingested into TSDB storage
+Writing recording rules to pre-aggregate high-resolution Istio metrics into lower-cardinality rollups
+Using topk and cardinality analysis queries to identify which metrics are burning your series budget
+Trade-offs between dropping labels at scrape time versus aggregating at query time — and why interviewers care about the difference
+
+Keywords: Prometheus cardinality, Istio metrics, relabel_configs, recording rules, TSDB series limit
+
+🎧 Listen, then go deeper — DevOps & Cloud interview-prep ebooks at DevOpsInterview.Cloud]]></description>
+      <enclosure url="https://devopsinterviewcloud.github.io/podcast-feed/audio/ep_20260617_1000773120608.m4a" length="21686299" type="audio/x-m4a"/>
+      <itunes:duration>00:22:20</itunes:duration>
+      <itunes:explicit>false</itunes:explicit>
+    </item>
+    <item>
+      <title>Conftest in Argo CD: Block Public S3 Buckets at GitOps Gate</title>
+      <guid isPermaLink="false">devopsinterviewcloud.podbean.com/9c506ef1-213a-3f3b-a18e-cb767e4645e4</guid>
+      <pubDate>Wed, 17 Jun 2026 12:39:01 +0000</pubDate>
+      <description><![CDATA[A developer pushes a Terraform module with a public S3 bucket — here's exactly how to catch and block it in your Argo CD pipeline using Conftest policy-as-code before it ever reaches production.
+
+You'll learn:
+
+How Conftest integrates with Argo CD as a pre-sync hook to enforce OPA policies on Terraform plans
+Writing a Rego rule that flags acl = public-read or block_public_acls = false on aws_s3_bucket resources
+Where in the GitOps workflow the gate fires — and why admission controllers alone aren't enough for IaC drift
+How to surface policy failures as Argo CD sync errors so engineers see the violation before merge, not after deploy
+Common gotchas: Terraform plan JSON output format, conftest namespace mismatches, and false positives on legacy modules
+
+Keywords: Conftest Argo CD policy, OPA Terraform GitOps, block public S3 bucket IaC, GitOps security controls, Rego policy Terraform plan
+
+🎧 Listen, then go deeper — DevOps & Cloud interview-prep ebooks at DevOpsInterview.Cloud]]></description>
+      <enclosure url="https://devopsinterviewcloud.github.io/podcast-feed/audio/ep_20260617_1000773118681.m4a" length="17619233" type="audio/x-m4a"/>
+      <itunes:duration>00:18:09</itunes:duration>
+      <itunes:explicit>false</itunes:explicit>
+    </item>
+    <item>
+      <title>Terragrunt at Scale: Dependency Graphs, Circular Deps &amp; OCI Versioning</title>
+      <guid isPermaLink="false">devopsinterviewcloud.podbean.com/ad5a1b29-085f-3e6d-aa5c-2cde1ded037c</guid>
+      <pubDate>Wed, 17 Jun 2026 04:05:15 +0000</pubDate>
+      <description><![CDATA[Managing a Terragrunt dependency graph across 500+ modules without hitting circular dependencies or version drift is one of the hardest scaling problems in platform engineering.
+
+You'll learn:
+
+How to map and audit a large Terragrunt dependency graph using terragrunt graph-dependencies and DAG visualisation tools
+Patterns for structuring module hierarchies to prevent circular dependencies before they reach CI
+Enforcing module versioning with OCI registries — why OCI beats Git tags at this scale
+How to segment a 500+ module monorepo into dependency tiers so targeted runs stay fast
+Common failure modes: implicit dependencies, missing mock_outputs, and run-all ordering bugs
+
+Keywords: Terragrunt dependency graph, Terragrunt at scale, OCI module registry, circular dependencies Terraform, platform engineering IaC
+
+🎧 Listen, then go deeper — DevOps & Cloud interview-prep ebooks at DevOpsInterview.Cloud]]></description>
+      <enclosure url="https://devopsinterviewcloud.github.io/podcast-feed/audio/ep_20260617_1000773063401.m4a" length="18764208" type="audio/x-m4a"/>
+      <itunes:duration>00:19:20</itunes:duration>
+      <itunes:explicit>false</itunes:explicit>
+    </item>
+    <item>
+      <title>External Secrets Operator: Vault Dynamic Secrets in Kubernetes Without Sidecars</title>
+      <guid isPermaLink="false">devopsinterviewcloud.podbean.com/4c4982f2-a090-3f8b-bf4d-5a1f926d3fcf</guid>
+      <pubDate>Wed, 17 Jun 2026 03:51:03 +0000</pubDate>
+      <description><![CDATA[External Secrets Operator lets you sync HashiCorp Vault dynamic secrets directly into Kubernetes Secrets — no Vault Agent sidecars, no annotation sprawl.
+
+You'll learn:
+
+How ESO's ExternalSecret and SecretStore CRDs map Vault paths to Kubernetes Secrets
+Why dynamic secrets (short-lived, auto-rotated) are preferable to static tokens and how ESO handles lease renewal
+The auth methods ESO supports for talking to Vault — Kubernetes auth vs. AppRole and when to use each
+Common failure modes: stale secrets after Vault seal, RBAC misconfigs, and refresh interval gotchas
+How to scope a ClusterSecretStore safely across namespaces without over-permissioning
+
+Keywords: External Secrets Operator, HashiCorp Vault Kubernetes integration, dynamic secrets management, Vault sidecar alternative, Kubernetes secrets sync
+
+🎧 Listen, then go deeper — DevOps & Cloud interview-prep ebooks at DevOpsInterview.Cloud]]></description>
+      <enclosure url="https://devopsinterviewcloud.github.io/podcast-feed/audio/ep_20260617_1000773060914.m4a" length="16267788" type="audio/x-m4a"/>
+      <itunes:duration>00:16:45</itunes:duration>
+      <itunes:explicit>false</itunes:explicit>
+    </item>
+    <item>
+      <title>Jenkins Helm Deadlocks: Diagnose with jstack and Mutex Locks</title>
+      <guid isPermaLink="false">devopsinterviewcloud.podbean.com/43927cf1-e030-3f92-85f7-760e2d54e088</guid>
+      <pubDate>Tue, 16 Jun 2026 11:39:33 +0000</pubDate>
+      <description><![CDATA[Parallel Jenkins jobs deploying Helm charts can deadlock silently — here's how to catch and fix mutex contention before it kills your pipeline.
+
+You'll learn:
+
+Why concurrent Helm deploys compete for the same release lock and how that surfaces as a deadlock in Jenkins
+How to run jstack against the Jenkins JVM to capture thread dumps and identify which threads are waiting on a monitor lock
+Reading mutex lock output to pinpoint the blocked executor and the thread holding it
+Helm-side mitigations: namespace isolation, --atomic flag behaviour, and serialising releases with lockfiles or pipeline lock() steps
+When to escalate from a workaround to a structural fix — separate agents, dedicated namespaces, or a Helm operator pattern
+
+Keywords: Jenkins parallel jobs deadlock, Helm chart deployment lock, jstack thread dump Jenkins, mutex lock CI/CD pipeline, Jenkins pipeline concurrency
+
+🎧 Listen, then go deeper — DevOps & Cloud interview-prep ebooks at DevOpsInterview.Cloud]]></description>
+      <enclosure url="https://devopsinterviewcloud.github.io/podcast-feed/audio/ep_20260616_1000772955763.m4a" length="14992819" type="audio/x-m4a"/>
+      <itunes:duration>00:15:26</itunes:duration>
+      <itunes:explicit>false</itunes:explicit>
+    </item>
+    <item>
+      <title>CloudFormation Drift Detection: AWS Config + Lambda Auto-Remediation</title>
+      <guid isPermaLink="false">devopsinterviewcloud.podbean.com/1538c196-4d07-338c-978b-27c2d8170025</guid>
+      <pubDate>Tue, 16 Jun 2026 11:31:00 +0000</pubDate>
+      <description><![CDATA[Learn how to enforce CloudFormation stack drift detection at scale using AWS Config rules and Lambda-driven auto-remediation — a common architecture question in senior Cloud and DevOps interviews.
+
+You'll learn:
+
+How AWS Config detects configuration drift against CloudFormation expected stack states using managed and custom rules
+Wiring an EventBridge rule to trigger a Lambda function when Config flags a stack as DRIFTED
+Lambda remediation patterns: re-running cloudformation detect-stack-drift vs. forcing a stack update to reconcile out-of-band changes
+Gotchas around drift detection cost, IAM permissions for the Config recorder, and distinguishing intentional changes from real drift
+How to scope remediation safely — alerting vs. hard auto-rollback and when each is appropriate in production
+
+Keywords: CloudFormation drift detection, AWS Config auto-remediation, Lambda CloudFormation remediation, IaC drift enforcement, AWS Config rules interview
+
+🎧 Listen, then go deeper — DevOps & Cloud interview-prep ebooks at DevOpsInterview.Cloud]]></description>
+      <enclosure url="https://devopsinterviewcloud.github.io/podcast-feed/audio/ep_20260616_1000772955371.m4a" length="17165630" type="audio/x-m4a"/>
+      <itunes:duration>00:17:41</itunes:duration>
+      <itunes:explicit>false</itunes:explicit>
+    </item>
+    <item>
+      <title>DynamoDB Multi-Region Cost: Cut Data Transfer 70%</title>
+      <guid isPermaLink="false">devopsinterviewcloud.podbean.com/562ae65e-0160-3795-94d1-09447f98b4b0</guid>
+      <pubDate>Mon, 15 Jun 2026 12:24:04 +0000</pubDate>
+      <description><![CDATA[Reducing DynamoDB Global Tables data transfer costs by 70% is achievable in a multi-region Active-Active setup — if you know where the money is actually going.
+
+You'll learn:
+
+Why replicated write costs dominate in DynamoDB Global Tables and how to model them accurately
+Using write sharding and conditional writes to reduce unnecessary replication traffic
+DAX (DynamoDB Accelerator) placement per region to cut cross-region read fallback
+Architecting read patterns to stay local — avoiding the latency and cost of cross-region reads
+Cost monitoring with AWS Cost Explorer tags scoped to replication vs. application traffic
+
+Keywords: DynamoDB Global Tables cost optimization, multi-region Active-Active AWS, DynamoDB replication costs, AWS data transfer cost reduction
+
+🎧 Listen, then go deeper — DevOps & Cloud interview-prep ebooks at DevOpsInterview.Cloud]]></description>
+      <enclosure url="https://devopsinterviewcloud.github.io/podcast-feed/audio/ep_20260615_1000772803503.m4a" length="23895287" type="audio/x-m4a"/>
+      <itunes:duration>00:24:37</itunes:duration>
+      <itunes:explicit>false</itunes:explicit>
+    </item>
+    <item>
+      <title>Terraform Apply Timeouts: IAM Role Batching at Scale</title>
+      <guid isPermaLink="false">devopsinterviewcloud.podbean.com/b98a1c81-8bd7-3dea-bb38-36ad9f2fb45d</guid>
+      <pubDate>Sun, 14 Jun 2026 12:38:57 +0000</pubDate>
+      <description><![CDATA[When terraform apply times out creating 100+ IAM roles, the culprit is usually AWS API throttling combined with Terraform's default parallelism — here's how to fix it.
+
+You'll learn:
+
+Why the default parallelism=10 isn't always safe and when raising it to -parallelism=50 helps vs. hurts
+How AWS IAM's eventual-consistency model causes race conditions during bulk role creation
+Batching strategies: splitting large role sets across multiple terraform apply runs or using for_each with targeted applies
+Reading AWS API throttle errors in Terraform debug output (TF_LOG=DEBUG) to confirm the real bottleneck
+Exponential backoff and retry tuning via the AWS provider's max_retries setting
+
+Keywords: terraform apply timeout, AWS IAM role throttling, terraform parallelism, terraform at scale, IAM API rate limits
+
+🎧 Listen, then go deeper — DevOps & Cloud interview-prep ebooks at DevOpsInterview.Cloud]]></description>
+      <enclosure url="https://devopsinterviewcloud.github.io/podcast-feed/audio/ep_20260614_1000772642206.m4a" length="21651939" type="audio/x-m4a"/>
+      <itunes:duration>00:22:18</itunes:duration>
+      <itunes:explicit>false</itunes:explicit>
+    </item>
+    <item>
+      <title>GitHub Actions at 10K Daily Builds: Runner Strategy for Scale</title>
+      <guid isPermaLink="false">devopsinterviewcloud.podbean.com/0205e74e-380b-37dd-ba04-1b7058108d53</guid>
+      <pubDate>Sun, 14 Jun 2026 12:27:29 +0000</pubDate>
+      <description><![CDATA[When GitHub Actions pipelines hit thousands of daily builds, your runner strategy becomes a first-class infrastructure decision — here's how to choose between self-hosted runners, larger hosted runners, and the Kubernetes executor.
+
+You'll learn:
+
+How GitHub-hosted larger runners (up to 64-core) reduce ops overhead versus self-hosted, and where the cost curve flips
+Self-hosted runner autoscaling with actions-runner-controller (ARC) on Kubernetes — ephemeral pods per job, KEDA-based scaling triggers
+Kubernetes executor trade-offs: pod startup latency, RBAC isolation, and shared caching via persistent volumes or S3-backed artifact stores
+Queue depth, job concurrency limits, and why runner group segmentation matters at 10K+ builds per day
+Common failure modes: runner re-use contamination, Docker-in-Docker socket conflicts, and rate-limit exhaustion on the GitHub API
+
+Keywords: GitHub Actions self-hosted runners, actions-runner-controller Kubernetes, scaling CI pipelines, GitHub larger runners, ARC autoscaling
+
+🎧 Listen, then go deeper — DevOps & Cloud interview-prep ebooks at DevOpsInterview.Cloud]]></description>
+      <enclosure url="https://devopsinterviewcloud.github.io/podcast-feed/audio/ep_20260614_1000772641505.m4a" length="23733631" type="audio/x-m4a"/>
+      <itunes:duration>00:24:27</itunes:duration>
+      <itunes:explicit>false</itunes:explicit>
+    </item>
+    <item>
+      <title>FIPS 140-3 on EKS: Bottlerocket OS and KMS Hardware Modules</title>
+      <guid isPermaLink="false">devopsinterviewcloud.podbean.com/2e052d2a-19e8-3538-aba2-d69eb90217e6</guid>
+      <pubDate>Sat, 13 Jun 2026 12:33:53 +0000</pubDate>
+      <description><![CDATA[Enforcing FIPS 140-3 compliance on an EKS cluster means locking down every layer — from the OS to the key management hardware — and this episode walks through exactly how Bottlerocket and AWS KMS make that possible.
+
+You'll learn:
+
+Why Bottlerocket OS ships with a FIPS-validated kernel and how to verify its cryptographic module status at node bootstrap
+How AWS KMS custom key stores backed by CloudHSM satisfy the hardware security module requirement under FIPS 140-3
+Enforcing TLS 1.2+ with FIPS-approved cipher suites across EKS control plane and data plane communication
+IAM and pod-level controls to ensure workloads only call FIPS-compliant API endpoints
+Common audit failures — weak cipher negotiation, unvalidated node images — and how to catch them before an assessor does
+
+Keywords: FIPS 140-3 EKS, Bottlerocket FIPS compliance, AWS KMS CloudHSM, EKS security hardening, FIPS validated Kubernetes
+
+🎧 Listen, then go deeper — DevOps & Cloud interview-prep ebooks at DevOpsInterview.Cloud]]></description>
+      <enclosure url="https://devopsinterviewcloud.github.io/podcast-feed/audio/ep_20260613_1000772531908.m4a" length="15541877" type="audio/x-m4a"/>
+      <itunes:duration>00:16:00</itunes:duration>
+      <itunes:explicit>false</itunes:explicit>
+    </item>
+    <item>
+      <title>AWS Lookout for Metrics: Killing Alert Fatigue at Scale</title>
+      <guid isPermaLink="false">devopsinterviewcloud.podbean.com/2390bcea-babb-3199-b42b-96ced112b89b</guid>
+      <pubDate>Sat, 13 Jun 2026 12:24:42 +0000</pubDate>
+      <description><![CDATA[When you're drowning in 1,000+ alerts a day, AWS Lookout for Metrics can route only the anomalies that matter directly to Slack or Teams — here's how to wire it up.
+
+You'll learn:
+
+How AWS Lookout for Metrics uses ML to separate real anomalies from noise across CloudWatch, S3, and RDS data sources
+Routing detected anomalies to Slack or Microsoft Teams via SNS topics and Lambda webhook integrations
+Tuning sensitivity thresholds to reduce false positives without missing critical incidents
+Grouping related alerts into a single notification so on-call engineers see context, not a flood of individual triggers
+Where Lookout for Metrics fits alongside existing tools like PagerDuty, OpsGenie, and CloudWatch Alarms
+
+Keywords: alert fatigue DevOps, AWS Lookout for Metrics, ML anomaly detection AWS, Slack alerting pipeline, SRE on-call interview questions
+
+🎧 Listen, then go deeper — DevOps & Cloud interview-prep ebooks at DevOpsInterview.Cloud]]></description>
+      <enclosure url="https://devopsinterviewcloud.github.io/podcast-feed/audio/ep_20260613_1000772524154.m4a" length="16915858" type="audio/x-m4a"/>
+      <itunes:duration>00:17:25</itunes:duration>
+      <itunes:explicit>false</itunes:explicit>
+    </item>
+    <item>
+      <title>Cross-Account IAM Roles: Auditing with Access Analyzer</title>
+      <guid isPermaLink="false">devopsinterviewcloud.podbean.com/cf21b728-2188-38ad-a244-5e148d10a233</guid>
+      <pubDate>Fri, 12 Jun 2026 12:35:57 +0000</pubDate>
+      <description><![CDATA[Auditing cross-account IAM roles is one of those senior interview topics where vague answers kill your chances — here's how to use AWS IAM Access Analyzer and Policy Sentry to give a precise, credible response.
+
+You'll learn:
+
+How IAM Access Analyzer detects externally accessible roles and flags unintended cross-account trust relationships
+How Policy Sentry helps you write and audit least-privilege IAM policies by mapping actions to resource ARNs
+The difference between resource-based and identity-based policy analysis — and why interviewers expect you to know both
+How to interpret Access Analyzer findings and translate them into remediation steps during a live interview
+Common gotchas: why a role with no findings isn't necessarily safe, and how SCPs interact with cross-account access
+
+Keywords: cross-account IAM roles, AWS IAM Access Analyzer, Policy Sentry, least privilege IAM, cloud security interview questions
+
+🎧 Listen, then go deeper — DevOps & Cloud interview-prep ebooks at DevOpsInterview.Cloud]]></description>
+      <enclosure url="https://devopsinterviewcloud.github.io/podcast-feed/audio/ep_20260612_1000772366288.m4a" length="18745408" type="audio/x-m4a"/>
+      <itunes:duration>00:19:19</itunes:duration>
+      <itunes:explicit>false</itunes:explicit>
+    </item>
+    <item>
+      <title>FinOps 2.0: Forecast GenAI Cloud Spend with AWS Cost Explorer and Prophet</title>
+      <guid isPermaLink="false">devopsinterviewcloud.podbean.com/49e65931-5424-3bb0-b497-376e6b3ebcf8</guid>
+      <pubDate>Wed, 10 Jun 2026 12:26:39 +0000</pubDate>
+      <description><![CDATA[Forecasting cloud spend for a generative AI workload means dealing with wildly variable GPU instance costs, token-based API charges, and inference traffic spikes — here's how to model it with the AWS Cost Explorer API and Facebook Prophet.
+
+You'll learn:
+
+How to pull historical cost data via the AWS Cost Explorer API using get_cost_and_usage with granularity and filter parameters scoped to your GenAI services
+Why Prophet handles the irregular seasonality and step-change cost patterns common in AI workloads better than ARIMA-style models
+How to separate fixed infrastructure costs (SageMaker endpoints, EKS nodes) from variable token/inference costs before feeding data into your forecast model
+How to set anomaly detection thresholds and wire Cost Explorer Anomaly Detection alongside your Prophet forecast as a sanity check
+FinOps tagging strategy for GenAI apps — without clean cost allocation tags, your forecast data is noise
+
+Keywords: FinOps cloud cost forecasting, AWS Cost Explorer API, Prophet ML forecasting, generative AI cloud spend, SageMaker cost optimization
+
+🎧 Listen, then go deeper — DevOps & Cloud interview-prep ebooks at DevOpsInterview.Cloud]]></description>
+      <enclosure url="https://devopsinterviewcloud.github.io/podcast-feed/audio/ep_20260610_1000772028947.m4a" length="14120848" type="audio/x-m4a"/>
+      <itunes:duration>00:14:33</itunes:duration>
+      <itunes:explicit>false</itunes:explicit>
+    </item>
+    <item>
+      <title>Secret Scanning in CI: Stop AWS Keys Leaking to GitHub</title>
+      <guid isPermaLink="false">devopsinterviewcloud.podbean.com/21d6f459-fbb2-3dc6-8a39-1661b586ed9b</guid>
+      <pubDate>Mon, 08 Jun 2026 11:32:57 +0000</pubDate>
+      <description><![CDATA[Secret scanning with Gitleaks and pre-commit hooks is your last line of defence before AWS credentials hit a public GitHub repo — here's how to set it up properly in CI.
+
+You'll learn:
+
+How to install and configure Gitleaks to scan for AWS keys, tokens, and other secrets before a commit lands
+Why pre-commit hooks catch leaks that CI pipeline scans miss — and how to wire both together
+What to do when a secret has already been pushed: rotation steps, git history scrubbing with git filter-repo, and GitHub secret scanning alerts
+How interviewers expect you to reason about defence-in-depth: pre-commit → CI gate → repo-level scanning as layered controls
+Common gotchas: hooks that only run locally, bypassing with --no-verify, and enforcing server-side rules
+
+Keywords: secret scanning CI/CD, Gitleaks pre-commit hook, prevent AWS keys GitHub, DevOps security interview, credentials leaking git
+
+🎧 Listen, then go deeper — DevOps & Cloud interview-prep ebooks at DevOpsInterview.Cloud]]></description>
+      <enclosure url="https://devopsinterviewcloud.github.io/podcast-feed/audio/ep_20260608_1000771676230.m4a" length="27234488" type="audio/x-m4a"/>
+      <itunes:duration>00:28:03</itunes:duration>
+      <itunes:explicit>false</itunes:explicit>
+    </item>
+    <item>
+      <title>VPC Flow Log Anomaly Detection: Amazon Detective + Athena ML</title>
+      <guid isPermaLink="false">devopsinterviewcloud.podbean.com/90f6a439-5878-3b63-97fc-eef6e667bdfc</guid>
+      <pubDate>Mon, 08 Jun 2026 11:18:09 +0000</pubDate>
+      <description><![CDATA[Learn how to implement VPC flow log anomaly detection by combining Amazon Detective's graph-based investigation with Athena ML queries to surface real network threats.
+
+You'll learn:
+
+How Amazon Detective ingests VPC flow logs and builds behavior baselines using machine learning automatically
+Writing Athena ML USING FUNCTION queries against flow log data in S3 to flag statistical outliers in traffic volume or destination ports
+How to tie Detective findings back to specific ENIs, IAM roles, and EC2 instances for faster blast-radius assessment
+Where Athena ML ends and Detective begins — and why using both beats either alone for senior-level interviews
+Common gotchas: log format versions, partition projection in Athena, and Detective's 48-hour data warm-up window
+
+Keywords: VPC flow logs anomaly detection, Amazon Detective interview, Athena ML queries AWS, cloud security monitoring interview, AWS network threat detection
+
+🎧 Listen, then go deeper — DevOps & Cloud interview-prep ebooks at DevOpsInterview.Cloud]]></description>
+      <enclosure url="https://devopsinterviewcloud.github.io/podcast-feed/audio/ep_20260608_1000771674846.m4a" length="12567728" type="audio/x-m4a"/>
+      <itunes:duration>00:12:57</itunes:duration>
+      <itunes:explicit>false</itunes:explicit>
+    </item>
+    <item>
+      <title>Karpenter Multi-Team Clusters: NodePools, Weights &amp; Isolation</title>
+      <guid isPermaLink="false">devopsinterviewcloud.podbean.com/dad2526a-1025-3114-ade3-8e76f0a8b63d</guid>
+      <pubDate>Sat, 06 Jun 2026 04:29:50 +0000</pubDate>
+      <description><![CDATA[Architecting a single Karpenter cluster for ML, Backend, and Batch teams means getting NodePool weights and taint-based isolation right — or pods land somewhere expensive and wrong.
+
+You'll learn:
+
+How to define separate NodePools per team — ml-gpu (p3/p4 instances), backend (m5/m6), and batch-spot (Spot, any family)
+How Karpenter's spec.weight field drives pool selection: higher weight wins, ties break randomly
+The exact selection sequence — Karpenter first finds every pool that can satisfy the pod, then ranks by weight
+Why taints alone aren't enough: pairing gpu=true:NoSchedule and spot=true:NoSchedule with matching tolerations gives you hard isolation
+Senior gotcha: labels control scheduling preference, taints enforce it — you need both for airtight multi-team separation
+
+Keywords: Karpenter NodePool weights, multi-team Kubernetes cluster, Karpenter GPU NodePool, Karpenter spot instances, Kubernetes taint isolation
+
+🎧 Listen, then go deeper — DevOps & Cloud interview-prep ebooks at DevOpsInterview.Cloud]]></description>
+      <enclosure url="https://devopsinterviewcloud.github.io/podcast-feed/audio/ep_20260606_1000771415448.m4a" length="37836600" type="audio/x-m4a"/>
+      <itunes:duration>00:38:59</itunes:duration>
+      <itunes:explicit>false</itunes:explicit>
+    </item>
+    <item>
+      <title>Karpenter EC2NodeClass: AMI, Subnets, and EBS Config</title>
+      <guid isPermaLink="false">devopsinterviewcloud.podbean.com/044a497b-114d-3bc3-8d9b-401b3dd4cbcd</guid>
+      <pubDate>Fri, 05 Jun 2026 12:40:14 +0000</pubDate>
+      <description><![CDATA[When your security team mandates a specific AMI, private subnets, custom security groups, and encrypted EBS, Karpenter's EC2NodeClass is exactly where all of that infrastructure detail lives.
+
+You'll learn:
+
+The core separation of concerns: NodePool defines what to provision (requirements, constraints); EC2NodeClass defines how (the cloud-provider infrastructure details)
+How to pin a specific AMI using amiSelectorTerms and lock nodes to private subnets via tag-based subnetSelectorTerms
+Configuring securityGroupSelectorTerms and enforcing EBS encryption through blockDeviceMappings in the EC2NodeClass spec
+How nodeClassRef wires a NodePool to a NodeClass — and why one NodeClass can back many NodePools, making AMI rotation straightforward
+
+Keywords: Karpenter EC2NodeClass, Karpenter NodePool vs NodeClass, Karpenter AMI selection, Karpenter private subnets, Kubernetes node provisioning security
+
+🎧 Listen, then go deeper — DevOps & Cloud interview-prep ebooks at DevOpsInterview.Cloud]]></description>
+      <enclosure url="https://devopsinterviewcloud.github.io/podcast-feed/audio/ep_20260605_1000771320187.m4a" length="35709627" type="audio/x-m4a"/>
+      <itunes:duration>00:36:47</itunes:duration>
+      <itunes:explicit>false</itunes:explicit>
+    </item>
+    <item>
+      <title>Karpenter Consolidation &amp; Drift: 2 AM Node Cleanup</title>
+      <guid isPermaLink="false">devopsinterviewcloud.podbean.com/a43ac237-dc7d-38dc-86da-701184340cf4</guid>
+      <pubDate>Sat, 28 Feb 2026 09:10:07 +0000</pubDate>
+      <description><![CDATA[Your cluster is burning 50 nodes at 10% utilization at 2 AM with a stale AMI — here's exactly how Karpenter's disruption engine handles both problems automatically.
+
+You'll learn:
+
+Setting consolidationPolicy: WhenEmptyOrUnderutilized with a consolidateAfter: 30s window to drain and terminate underutilized nodes
+How Karpenter's drift detection compares live node spec against the current NodeClass — and marks nodes drifted when the AMI changes
+Using expireAfter: 720h to force a rolling node refresh every 30 days as a TTL safety net
+Why consolidation, drift, and expiration are all forms of the same primitive: Karpenter's disruption mechanism
+
+Keywords: Karpenter consolidation, Karpenter drift detection, node expiration TTL, Kubernetes node lifecycle, Karpenter NodePool disruption
+
+🎧 Listen, then go deeper — DevOps & Cloud interview-prep ebooks at DevOpsInterview.Cloud]]></description>
+      <enclosure url="https://devopsinterviewcloud.github.io/podcast-feed/audio/ep_20260228_1000752070302.m4a" length="24653149" type="audio/x-m4a"/>
+      <itunes:duration>00:25:24</itunes:duration>
+      <itunes:explicit>false</itunes:explicit>
+    </item>
+    <item>
+      <title>Azure Container Apps Migration: Zero-Downtime .NET &amp; SQL AG</title>
+      <guid isPermaLink="false">devopsinterviewcloud.podbean.com/ef8fe2b9-c876-3363-b162-3f083085a171</guid>
+      <pubDate>Thu, 18 Sep 2025 08:17:53 +0000</pubDate>
+      <description><![CDATA[Migrating a stateful .NET app from Azure VMs to Azure Container Apps without dropping a single request — including SQL Server Always On AG failover — is exactly the kind of scenario senior interviewers throw at platform engineers.
+
+You'll learn:
+
+How to containerize a stateful .NET app and handle session/state externalization before cutover
+Azure Container Apps environment setup: managed environments, Dapr sidecars, and ingress configuration for gradual traffic shifting
+SQL Server Always On Availability Group failover patterns — listener routing, read-scale replicas, and avoiding split-brain during migration
+Blue/green and weighted traffic strategies in Azure Container Apps to achieve zero-downtime cutover
+Common gotchas: persistent volume claims, connection string management with Key Vault references, and health probe tuning
+
+Keywords: Azure Container Apps migration, SQL Server Always On failover, zero downtime .NET containerization, stateful app Azure Kubernetes migration, platform engineering interview
+
+🎧 Listen, then go deeper — DevOps & Cloud interview-prep ebooks at DevOpsInterview.Cloud]]></description>
+      <enclosure url="https://devopsinterviewcloud.github.io/podcast-feed/audio/ep_20250918_1000727314901.m4a" length="16258029" type="audio/x-m4a"/>
+      <itunes:duration>00:16:45</itunes:duration>
+      <itunes:explicit>false</itunes:explicit>
+    </item>
+    <item>
+      <title>Argo CD Multi-Tenancy: SSO, Sharding &amp; Namespace Isolation</title>
+      <guid isPermaLink="false">devopsinterviewcloud.podbean.com/3febcbf4-6598-32d6-a435-f1515c9c3ca6</guid>
+      <pubDate>Wed, 10 Sep 2025 08:10:01 +0000</pubDate>
+      <description><![CDATA[Scaling Argo CD across 100+ teams demands more than one cluster — this episode breaks down how to architect multi-tenant Argo CD with SSO, cluster sharding, and hard namespace boundaries.
+
+You'll learn:
+
+How to integrate SSO (Dex/OIDC) with Argo CD RBAC to enforce per-team access without shared admin credentials
+When and how to shard Argo CD across multiple Application Controllers to avoid reconciliation bottlenecks at scale
+Namespace isolation strategies — AppProject restrictions, resource whitelists, and preventing cross-team blast radius
+How to structure AppProjects so each team only sees and deploys to their own namespaces and clusters
+Common gotchas: overlapping RBAC rules, controller memory pressure, and misconfigured destination restrictions
+
+Keywords: Argo CD multi-tenancy, Argo CD SSO OIDC, Argo CD cluster sharding, AppProject namespace isolation, GitOps platform engineering
+
+🎧 Listen, then go deeper — DevOps & Cloud interview-prep ebooks at DevOpsInterview.Cloud]]></description>
+      <enclosure url="https://devopsinterviewcloud.github.io/podcast-feed/audio/ep_20250910_1000725856517.m4a" length="18123224" type="audio/x-m4a"/>
+      <itunes:duration>00:18:40</itunes:duration>
+      <itunes:explicit>false</itunes:explicit>
+    </item>
+    <item>
+      <title>Kyverno Pod Security: Allowing NET_RAW for Legacy Apps</title>
+      <guid isPermaLink="false">devopsinterviewcloud.podbean.com/6ee2f493-e727-3b01-b5d9-9678a319fcf8</guid>
+      <pubDate>Tue, 09 Sep 2025 07:59:28 +0000</pubDate>
+      <description><![CDATA[When legacy workloads need NET_RAW, blanket Pod Security Admission enforcement breaks them — this episode walks through using Kyverno mutation policies to handle the exception without weakening your cluster-wide baseline.
+
+You'll learn:
+
+Why NET_RAW is dropped by the Kubernetes restricted and baseline PSA profiles and what that breaks in practice
+How to write a Kyverno mutate policy that injects a securityContext exception for specific legacy workloads
+Namespace-scoping strategies so your mutation doesn't accidentally widen the attack surface cluster-wide
+How to test policy enforcement with kubectl --dry-run and Kyverno's CLI before rolling to production
+Common gotchas: policy ordering, admission webhook conflicts, and audit vs enforce mode differences
+
+Keywords: Kyverno mutation policy, Pod Security Admission NET_RAW, Kubernetes pod security, PSA legacy workloads, Kyverno securityContext
+
+🎧 Listen, then go deeper — DevOps & Cloud interview-prep ebooks at DevOpsInterview.Cloud]]></description>
+      <enclosure url="https://devopsinterviewcloud.github.io/podcast-feed/audio/ep_20250909_1000725673366.m4a" length="13286863" type="audio/x-m4a"/>
+      <itunes:duration>00:13:41</itunes:duration>
+      <itunes:explicit>false</itunes:explicit>
+    </item>
+    <item>
+      <title>Java 21 Lambda Cold Starts: SnapStart vs Provisioned Concurrency vs GraalVM</title>
+      <guid isPermaLink="false">devopsinterviewcloud.podbean.com/aef24fb2-07f4-3ac7-844e-d7781f3ff329</guid>
+      <pubDate>Mon, 01 Sep 2025 08:03:55 +0000</pubDate>
+      <description><![CDATA[Cold start mitigation for Java 21 Lambda at 50K RPS is one of the most punishing interview questions for senior cloud engineers — here's how to compare the three real options without hand-waving.
+
+You'll learn:
+
+How SnapStart snapshots the Afterburner-restored JVM state and where it still adds latency on restore
+Why Provisioned Concurrency keeps execution environments warm but drives up cost at sustained 50K RPS
+Where GraalVM native compilation wins on p99 cold-start time and what you sacrifice in build complexity and reflection support
+How to frame the tradeoff in an interview: cost per invocation, tail latency SLOs, and CI/CD pipeline impact
+Which option AWS recommends for high-throughput workloads and why that answer depends on traffic shape
+
+Keywords: Java Lambda cold start, SnapStart vs provisioned concurrency, GraalVM native Lambda, AWS Lambda 50K RPS, Lambda performance tuning
+
+🎧 Listen, then go deeper — DevOps & Cloud interview-prep ebooks at DevOpsInterview.Cloud]]></description>
+      <enclosure url="https://devopsinterviewcloud.github.io/podcast-feed/audio/ep_20250901_1000725480511.m4a" length="19872472" type="audio/x-m4a"/>
+      <itunes:duration>00:20:28</itunes:duration>
+      <itunes:explicit>false</itunes:explicit>
+    </item>
+    <item>
+      <title>Kata Containers: Diagnosing ’Container Not Started’ Errors</title>
+      <guid isPermaLink="false">devopsinterviewcloud.podbean.com/777b7b13-da19-36a1-b669-b8871faea42a</guid>
+      <pubDate>Tue, 26 Aug 2025 07:56:09 +0000</pubDate>
+      <description><![CDATA[When eBPF-based security profiles silently block syscalls in a Kata Containers runtime, tracking down 'container not started' errors requires knowing exactly where to look.
+
+You'll learn:
+
+How Kata Containers' nested virtualization layer changes where failures actually surface versus standard runc
+Why eBPF security profiles (Seccomp, BPF-LSM) can silently drop syscalls that the guest kernel needs at startup
+Using dmesg, kata-runtime logs, and bpftool prog tracelog to correlate guest-side panics with host-side policy denials
+Common gotchas: mismatched kernel versions between host and guest image causing profile incompatibilities
+How to audit and iterate on allow-lists without disabling your security profile entirely
+
+Keywords: Kata Containers debugging, eBPF security profiles, container runtime errors, Seccomp troubleshooting, SRE interview prep
+
+🎧 Listen, then go deeper — DevOps & Cloud interview-prep ebooks at DevOpsInterview.Cloud]]></description>
+      <enclosure url="https://devopsinterviewcloud.github.io/podcast-feed/audio/ep_20250826_1000725480309.m4a" length="12772778" type="audio/x-m4a"/>
+      <itunes:duration>00:13:09</itunes:duration>
+      <itunes:explicit>false</itunes:explicit>
+    </item>
+    <item>
+      <title>S3 Object Lambda: Redact PII from Legacy Data Without ETL</title>
+      <guid isPermaLink="false">devopsinterviewcloud.podbean.com/a8c66c0d-9873-36c1-baa4-fc5dbaaa5c1e</guid>
+      <pubDate>Mon, 25 Aug 2025 11:53:05 +0000</pubDate>
+      <description><![CDATA[S3 Object Lambda lets you dynamically redact PII from petabytes of legacy data at read time — no ETL pipelines, no data duplication, no migration headaches.
+
+You'll learn:
+
+How S3 Object Lambda intercepts GetObject calls to transform data on the fly before it reaches the caller
+Wiring a Lambda function to an Object Lambda Access Point to strip or mask PII fields in real time
+Why this approach beats ETL for legacy datasets: no reprocessing, no storage doubling, no pipeline maintenance
+Common gotchas — Lambda timeout limits, response size caps, and IAM permission layering across access points
+When to combine S3 Object Lambda with Macie for automated PII detection before writing redaction logic
+
+Keywords: S3 Object Lambda interview, redact PII AWS, AWS data privacy without ETL, S3 access point Lambda transform
+
+🎧 Listen, then go deeper — DevOps & Cloud interview-prep ebooks at DevOpsInterview.Cloud]]></description>
+      <enclosure url="https://devopsinterviewcloud.github.io/podcast-feed/audio/ep_20250825_1000725480454.m4a" length="16277511" type="audio/x-m4a"/>
+      <itunes:duration>00:16:46</itunes:duration>
+      <itunes:explicit>false</itunes:explicit>
+    </item>
+    <item>
+      <title>AWS Global Accelerator Latency: Direct Connect Troubleshooting</title>
+      <guid isPermaLink="false">devopsinterviewcloud.podbean.com/53156333-b02c-379c-9f06-f9f2faca4cb1</guid>
+      <pubDate>Mon, 25 Aug 2025 11:43:29 +0000</pubDate>
+      <description><![CDATA[Latency spikes in an AWS Global Accelerator setup with Direct Connect are notoriously hard to pin down — this episode walks through a structured troubleshooting approach including VPC Flow Logs analysis.
+
+You'll learn:
+
+How to isolate whether latency originates at the Global Accelerator edge, the Direct Connect path, or inside the VPC
+Reading VPC Flow Logs to identify packet loss, retransmits, and asymmetric routing across regions
+Using CloudWatch Network Monitor and AWS Health events to correlate inter-region degradation
+Common Direct Connect BGP misconfiguration gotchas that cause intermittent spikes rather than full outages
+When to escalate to AWS Support with the right data already gathered
+
+Keywords: AWS Global Accelerator troubleshooting, Direct Connect latency, VPC Flow Logs analysis, inter-region latency AWS, BGP misconfiguration AWS
+
+🎧 Listen, then go deeper — DevOps & Cloud interview-prep ebooks at DevOpsInterview.Cloud]]></description>
+      <enclosure url="https://devopsinterviewcloud.github.io/podcast-feed/audio/ep_20250825_1000725480452.m4a" length="15340187" type="audio/x-m4a"/>
+      <itunes:duration>00:15:48</itunes:duration>
+      <itunes:explicit>false</itunes:explicit>
+    </item>
+    <item>
+      <title>AKS Zero-Trust Access: Arc, OPA Gatekeeper &amp; On-Prem</title>
+      <guid isPermaLink="false">devopsinterviewcloud.podbean.com/c4af4de9-8b53-3bbd-952c-0eeb6d028a5c</guid>
+      <pubDate>Mon, 25 Aug 2025 11:34:31 +0000</pubDate>
+      <description><![CDATA[Architecting zero-trust access to an AKS cluster from on-prem legacy systems is one of those senior interview questions that exposes whether you actually understand the control plane or just know the buzzwords.
+
+You'll learn:
+
+How Azure Arc projects on-prem and legacy workloads into the Azure control plane without exposing the API server publicly
+Where OPA Gatekeeper fits — enforcing admission policies at the Kubernetes layer so workloads that pass network controls still get policy-checked
+Layering Azure AD Workload Identity and managed identities to eliminate long-lived credentials between legacy systems and AKS
+Private endpoint and Azure Private Link design decisions that keep east-west traffic off the public internet
+Common gotchas: Gatekeeper constraint template scope, Arc-enabled Kubernetes agent connectivity requirements, and policy exemption risks
+
+Keywords: AKS zero-trust, Azure Arc Kubernetes, OPA Gatekeeper interview, on-prem to AKS security, Azure private endpoint AKS
+
+🎧 Listen, then go deeper — DevOps & Cloud interview-prep ebooks at DevOpsInterview.Cloud]]></description>
+      <enclosure url="https://devopsinterviewcloud.github.io/podcast-feed/audio/ep_20250825_1000725480427.m4a" length="10184275" type="audio/x-m4a"/>
+      <itunes:duration>00:10:29</itunes:duration>
+      <itunes:explicit>false</itunes:explicit>
+    </item>
+    <item>
+      <title>Quantum-Resistant Encryption on GCP: Kyber, Dilithium &amp; Key Rotation</title>
+      <guid isPermaLink="false">devopsinterviewcloud.podbean.com/a8d1b001-fdce-3e0e-96cf-5427eeb05f68</guid>
+      <pubDate>Fri, 22 Aug 2025 08:01:48 +0000</pubDate>
+      <description><![CDATA[Securing inter-region data in transit on Google Cloud with post-quantum algorithms like Kyber and Dilithium is fast becoming a senior interview topic — here's how to design it properly.
+
+You'll learn:
+
+Why NIST-selected algorithms Kyber (key encapsulation) and Dilithium (digital signatures) are the go-to choices for post-quantum TLS on GCP
+How to layer quantum-resistant encryption over inter-region traffic using Cloud VPN or BoringSSL-backed load balancers
+Designing a key rotation strategy that handles hybrid classical/PQC key pairs without dropping connections
+GCP-specific controls — Cloud KMS, Certificate Authority Service, and rotation scheduling via Cloud Scheduler
+Common interview gotchas: algorithm maturity trade-offs, latency impact of larger PQC key sizes, and hybrid mode rollout
+
+Keywords: post-quantum encryption GCP, Kyber Dilithium TLS, quantum-resistant key rotation, GCP inter-region security, Cloud KMS post-quantum
+
+🎧 Listen, then go deeper — DevOps & Cloud interview-prep ebooks at DevOpsInterview.Cloud]]></description>
+      <enclosure url="https://devopsinterviewcloud.github.io/podcast-feed/audio/ep_20250822_1000725480400.m4a" length="17655319" type="audio/x-m4a"/>
+      <itunes:duration>00:18:11</itunes:duration>
+      <itunes:explicit>false</itunes:explicit>
+    </item>
+    <item>
+      <title>Multi-Cloud Video Pipeline: Active-Active Under 100ms</title>
+      <guid isPermaLink="false">devopsinterviewcloud.podbean.com/a8602d90-6ae9-37c0-97b4-50373e3d98f8</guid>
+      <pubDate>Thu, 21 Aug 2025 09:10:08 +0000</pubDate>
+      <description><![CDATA[Designing an active-active video processing pipeline across AWS Elemental MediaLive and Azure Media Services — while hitting sub-100ms end-to-end latency — is exactly the kind of system design question that separates senior candidates from the rest.
+
+You'll learn:
+
+How to architect an active-active topology spanning AWS and Azure without a single-cloud bottleneck
+State synchronization patterns for keeping MediaLive and Azure Media Services in lockstep during failover
+Where latency actually gets eaten in a multi-cloud video pipeline and how to budget your 100ms budget across encode, transit, and egress
+Trade-offs between consistency and availability when both clouds are simultaneously serving live streams
+
+Keywords: multi-cloud video pipeline interview, AWS Elemental MediaLive design, active-active architecture, sub-100ms latency system design, cloud video streaming SRE
+
+🎧 Listen, then go deeper — DevOps & Cloud interview-prep ebooks at DevOpsInterview.Cloud]]></description>
+      <enclosure url="https://devopsinterviewcloud.github.io/podcast-feed/audio/ep_20250821_1000725480453.m4a" length="25526926" type="audio/x-m4a"/>
+      <itunes:duration>00:26:18</itunes:duration>
+      <itunes:explicit>false</itunes:explicit>
+    </item>
+  </channel>
+</rss>
