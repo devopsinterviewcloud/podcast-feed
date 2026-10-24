@@ -1,12 +1,12 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<rss version="2.0" xmlns:itunes="http://www.itunes.com/dtds/podcast-1.0.dtd" xmlns:atom="http://www.w3.org/2005/Atom">
+<rss version="2.0" xmlns:itunes="http://www.itunes.com/dtds/podcast-1.0.dtd" xmlns:atom="http://www.w3.org/2005/Atom" xmlns:podcast="https://podcastindex.org/namespace/1.0">
   <channel>
     <title>DevOps &amp; Cloud Interview Prep: Real Scenarios &amp; Answers</title>
     <link>https://devopsinterview.cloud</link>
     <atom:link href="https://devopsinterviewcloud.github.io/podcast-feed/feed.xml" rel="self" type="application/rss+xml"/>
     <description>Real DevOps and cloud interview scenarios, broken down the way a senior engineer would answer them. Kubernetes, AWS, Terraform, CI/CD, observability and incident response, with the trade-offs interviewers actually probe for. More prep material at devopsinterview.cloud.</description>
     <language>en</language>
-    <lastBuildDate>Thu, 22 Oct 2026 14:23:04 +0000</lastBuildDate>
+    <lastBuildDate>Sat, 24 Oct 2026 15:08:58 +0000</lastBuildDate>
     <itunes:author>DevOpsInterview.Cloud</itunes:author>
     <itunes:owner>
       <itunes:name>DevOpsInterview.Cloud</itunes:name>
@@ -15,6 +15,7 @@
     <itunes:image href="https://devopsinterviewcloud.github.io/podcast-feed/art/cover.png"/>
     <itunes:category text="Technology"/>
     <itunes:explicit>false</itunes:explicit>
+    <podcast:txt purpose="applepodcastsverify">b8b97840-cfbc-11f1-9661-f3d25deb1a2f</podcast:txt>
     <item>
       <title>EKS Control Plane Logs: Audit Trail for a Compliance Breach</title>
       <guid isPermaLink="false">dd84665a-5b6d-4bbe-b187-16105f238e99</guid>

@@ -67,8 +67,14 @@ def main():
       <itunes:explicit>false</itunes:explicit>{art}
     </item>""")
 
+    # Apple Podcasts Connect show-claim token; harmless to keep after the claim completes.
+    claim = ""
+    if cfg.get("apple_claim_token"):
+        claim = (f'\n    <podcast:txt purpose="applepodcastsverify">'
+                 f'{cfg["apple_claim_token"]}</podcast:txt>')
+
     feed = f"""<?xml version="1.0" encoding="UTF-8"?>
-<rss version="2.0" xmlns:itunes="http://www.itunes.com/dtds/podcast-1.0.dtd" xmlns:atom="http://www.w3.org/2005/Atom">
+<rss version="2.0" xmlns:itunes="http://www.itunes.com/dtds/podcast-1.0.dtd" xmlns:atom="http://www.w3.org/2005/Atom" xmlns:podcast="https://podcastindex.org/namespace/1.0">
   <channel>
     <title>{escape(cfg["title"])}</title>
     <link>{escape(cfg["link"])}</link>
@@ -83,7 +89,7 @@ def main():
     </itunes:owner>
     <itunes:image href="{base}/{cfg["cover"]}"/>
     <itunes:category text="{cfg["category"]}"/>
-    <itunes:explicit>false</itunes:explicit>
+    <itunes:explicit>false</itunes:explicit>{claim}
 {chr(10).join(items)}
   </channel>
 </rss>
